@@ -1,6 +1,6 @@
 # evcc-smart-limit
 
-[![Test and Publish](https://github.com/jmerhar/evcc-smart-limit/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/jmerhar/evcc-smart-limit/actions/workflows/build-and-push.yml)
+[![CI](https://github.com/jmerhar/evcc-smart-limit/actions/workflows/ci.yml/badge.svg)](https://github.com/jmerhar/evcc-smart-limit/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/jmerhar/evcc-smart-limit/branch/main/graph/badge.svg)](https://app.codecov.io/gh/jmerhar/evcc-smart-limit)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
