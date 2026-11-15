@@ -1,0 +1,9 @@
+# Shared by the backend, its tests, and the scripts in bin/. The rules come from jmerhar/devtools.
+extend = ".devtools/config/ruff.toml"
+
+[lint.extend-per-file-ignores]
+# A test's stand-in for a function often has to accept arguments it does not use.
+"/**/tests/**" = ["ARG005"]
+
+[lint.isort]
+known-first-party = ["evcc_smart_limit"]

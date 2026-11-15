@@ -1,0 +1,50 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "evcc-smart-limit"
+version = "0.1.0"
+description = "Keeps an evcc charging point's smart cost limit at the price of the cheapest hours of a rolling window"
+requires-python = ">=3.14"
+license = "MIT"
+dependencies = [
+    "jigkit[heartbeat]==0.18.0",
+    "httpx2>=2.16",
+    "pydantic>=2.13",
+    "pydantic-settings>=2.15",
+    # Time zones for TZ, which the slim base image may not carry.
+    "tzdata>=2026.5",
+]
+
+[project.optional-dependencies]
+test = [
+    "jigkit[testing]==0.18.0",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.4",
+    "pytest-cov>=7.1",
+    "ruff>=0.16",
+]
+
+[project.scripts]
+evcc-smart-limit = "evcc_smart_limit.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/jmerhar/evcc-smart-limit"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/evcc_smart_limit"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = ["error"]
+
+[tool.coverage.run]
+source = ["evcc_smart_limit"]
+# The controller is async. Coverage's sys.monitoring core (COVERAGE_CORE=sysmon, set in
+# bin/test-backend.sh) traces lines after `await`, which the legacy C core under-reports.
+branch = true
+omit = ["*/tests/*", "*/__main__.py"]
