@@ -1,5 +1,9 @@
 # evcc-smart-limit
 
+[![Test and Publish](https://github.com/jmerhar/evcc-smart-limit/actions/workflows/build-and-push.yml/badge.svg)](https://github.com/jmerhar/evcc-smart-limit/actions/workflows/build-and-push.yml)
+[![codecov](https://codecov.io/gh/jmerhar/evcc-smart-limit/branch/main/graph/badge.svg)](https://app.codecov.io/gh/jmerhar/evcc-smart-limit)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 Keeps an [evcc](https://evcc.io) charging point's smart cost limit at the price of the cheapest
 hours of the past week, so Smart mode charges the car when prices are at a local low, without a
 charging plan, a departure time or a limit you have to keep adjusting.
@@ -14,7 +18,8 @@ Every 15 minutes:
 
 1. **The window:** the grid prices of the last 7 days, from evcc's stored price history, plus
    evcc's forecast (usually the rest of today and, from the afternoon, tomorrow).
-2. **The hours needed:** the energy to the vehicle's charge limit, divided by the charging power:
+2. **The hours needed:** the energy to the charge limit (evcc's, or the limit set in the vehicle
+   when that is lower), divided by the charging power:
    `(limit − charge level) × battery capacity ÷ (charging power × efficiency)`. Multiplied by
    `FACTOR`, at least `MIN_HOURS`.
 3. **The limit:** the price of the cheapest that many hours in the window. A coming slot passes

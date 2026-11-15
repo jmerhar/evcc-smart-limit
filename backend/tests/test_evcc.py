@@ -115,3 +115,16 @@ async def test_body_that_is_not_json() -> None:
     async with httpx2.AsyncClient(transport=httpx2.MockTransport(garbage)) as client:
         with pytest.raises(EvccError, match="not JSON"):
             await Evcc(client, URL).forecast()
+
+
+@pytest.mark.parametrize(
+    ("evcc_limit", "vehicle_limit", "expected"),
+    [(100, 80, 80), (70, 80, 70), (90, 0, 90), (90, None, 90), (None, None, 100)],
+)
+async def test_the_lower_of_evccs_and_the_vehicles_limit(
+    fake: FakeEvcc, evcc_limit: int | None, vehicle_limit: int | None, expected: float
+) -> None:
+    fake.loadpoints = [evcc_loadpoint(effectiveLimitSoc=evcc_limit, vehicleLimitSoc=vehicle_limit)]
+    async with fake.client() as client:
+        lp = await Evcc(client, URL).loadpoint(1)
+    assert lp.limit_soc == expected

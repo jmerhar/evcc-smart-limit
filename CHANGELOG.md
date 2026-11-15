@@ -9,7 +9,7 @@ and versions follow [Semantic Versioning](https://semver.org/).
 
 - The controller: keeps a charging point's smart cost limit at the price of the cheapest hours of
   a rolling window (evcc's stored price history plus its forecast), sized to the energy the vehicle
-  needs.
+  needs to reach its charge limit (evcc's, or the limit set in the vehicle when that is lower).
 - Stays out of the way when the mode isn't Smart, no vehicle is connected, a plan is active, or
   someone changed the limit by hand (until the vehicle is next connected).
 - `once` prints a single decision; `backtest` replays evcc's price history against a CSV of charge

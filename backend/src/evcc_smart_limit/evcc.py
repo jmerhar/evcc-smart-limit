@@ -17,6 +17,17 @@ class EvccError(RuntimeError):
     """evcc answered with something the controller cannot use."""
 
 
+def charge_limit(lp: dict[str, Any]) -> float:
+    """The charge level charging stops at: evcc's limit, or the vehicle's own when it is lower.
+
+    evcc's ``effectiveLimitSoc`` does not include a limit set in the vehicle, which evcc reports
+    separately as ``vehicleLimitSoc`` (0 when unknown).
+    """
+    limit = float(lp.get("effectiveLimitSoc") or 100)
+    vehicle = lp.get("vehicleLimitSoc") or 0
+    return min(limit, float(vehicle)) if vehicle > 0 else limit
+
+
 class Evcc:
     """A client for one evcc instance.
 
@@ -63,7 +74,7 @@ class Evcc:
             heating=bool(lp.get("chargerFeatureHeating")),
             # evcc reports 0 when a vehicle's charge level is unknown.
             soc=float(soc) if soc else None,
-            limit_soc=float(lp.get("effectiveLimitSoc") or 100),
+            limit_soc=charge_limit(lp),
             smart_cost_limit=lp.get("smartCostLimit"),
             capacity_kwh=vehicle.get("capacity") or lp.get("vehicleCapacity") or None,
             max_current=float(lp.get("maxCurrent") or 16),
