@@ -43,6 +43,7 @@ class Result:
     cost: float = 0.0
     hours: float = 0.0
     min_soc: float = 100.0
+    end_soc: float = 0.0
 
     @property
     def average_price(self) -> float | None:
@@ -134,6 +135,8 @@ def simulate(
                 result.cost += drawn * slot.price
                 result.hours += HISTORY_SLOT.total_seconds() / 3600
         t += HISTORY_SLOT
+    for key, result in results.items():
+        result.end_soc = socs[key]
     return results["controller"], results["baseline"]
 
 
@@ -154,9 +157,11 @@ def _line(name: str, result: Result) -> str:
     avg = result.average_price
     return (
         f"{name:<11} {result.kwh:8.1f} kWh  {result.hours:6.2f} h  cost {result.cost:8.2f}  "
-        f"average {avg:.4f}/kWh  lowest charge level {result.min_soc:.0f}%"
+        f"average {avg:.4f}/kWh  lowest charge level {result.min_soc:.0f}%  "
+        f"at the end {result.end_soc:.0f}%"
         if avg is not None
-        else f"{name:<11} nothing charged  lowest charge level {result.min_soc:.0f}%"
+        else f"{name:<11} nothing charged  lowest charge level {result.min_soc:.0f}%  "
+        f"at the end {result.end_soc:.0f}%"
     )
 
 

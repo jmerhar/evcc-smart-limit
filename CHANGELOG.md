@@ -3,6 +3,13 @@
 Notable changes to evcc-smart-limit. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- The backtest reports each strategy's charge level at the end, so one that charged less does not
+  look cheaper for it.
+
 ## 0.1.0 — 2026-11-15
 
 ### Added

@@ -43,6 +43,7 @@ def test_controller_charges_in_the_cheap_slots_and_the_baseline_at_once() -> Non
     assert controller.kwh == pytest.approx(1 / 0.9)
     assert controller.average_price == pytest.approx(0.10)
     assert controller.min_soc == 90 and baseline.min_soc == 90
+    assert controller.end_soc == pytest.approx(100) and baseline.end_soc == pytest.approx(100)
 
 
 def test_driving_drops_both_vehicles_and_disconnection_stops_charging() -> None:
@@ -97,12 +98,12 @@ def test_read_csv(tmp_path: Path) -> None:
 
 
 def test_report_lines() -> None:
-    assert backtest._line("baseline", Result(kwh=10, cost=3, hours=1, min_soc=40)) == (
+    assert backtest._line("baseline", Result(kwh=10, cost=3, hours=1, min_soc=40, end_soc=75)) == (
         "baseline        10.0 kWh    1.00 h  cost     3.00  average 0.3000/kWh  "
-        "lowest charge level 40%"
+        "lowest charge level 40%  at the end 75%"
     )
     assert backtest._line("controller", Result()) == (
-        "controller  nothing charged  lowest charge level 100%"
+        "controller  nothing charged  lowest charge level 100%  at the end 0%"
     )
 
 
@@ -171,3 +172,4 @@ def test_real_charging_does_not_raise_the_simulated_level() -> None:
         power_kw=10,
     )
     assert controller.min_soc == 30
+    assert controller.end_soc == 30
