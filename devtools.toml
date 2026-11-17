@@ -62,8 +62,9 @@ env = { RUFF = "ruff" }
 image = "ghcr.io/jmerhar/evcc-smart-limit"
 
 # .github/dependabot.yml, generated from these by `make devtools-fix`: GitHub Actions, then the
-# update below, grouped into a single weekly pull request that takes a release once it is three
-# days old. A pull request builds the image, so a dependency that breaks it fails there.
+# update below. It takes a release once it is three days old, in one weekly pull request of minor
+# and patch releases and another of majors, which waits for a hand migration. A pull request builds
+# the image, so a dependency that breaks it fails there.
 [[dependabot.update]]
 ecosystem = "pip"
 directory = "/backend"
