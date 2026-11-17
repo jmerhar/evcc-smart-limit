@@ -9,7 +9,7 @@ description = "Keeps an evcc charging point's smart cost limit at the price of t
 requires-python = ">=3.14"
 license = "MIT"
 dependencies = [
-    "jigkit[heartbeat]==0.18.0",
+    "jigkit[heartbeat]==0.21.0",
     "httpx2>=2.16",
     "pydantic>=2.13",
     "pydantic-settings>=2.15",
@@ -19,7 +19,7 @@ dependencies = [
 
 [project.optional-dependencies]
 test = [
-    "jigkit[testing]==0.18.0",
+    "jigkit[testing]==0.21.0",
     "pytest>=9.1",
     "pytest-asyncio>=1.4",
     "pytest-cov>=7.1",
