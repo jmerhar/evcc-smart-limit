@@ -9,7 +9,7 @@
 # evcc's address on the host.
 services:
   evcc-smart-limit:
-    image: ghcr.io/jmerhar/evcc-smart-limit:0.1
+    image: ghcr.io/jmerhar/evcc-smart-limit:0.2
     container_name: evcc-smart-limit
     restart: unless-stopped
     user: "${EVCC_SMART_LIMIT_UID:-1000}:${EVCC_SMART_LIMIT_GID:-1000}"

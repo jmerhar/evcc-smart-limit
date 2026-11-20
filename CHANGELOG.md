@@ -3,7 +3,7 @@
 Notable changes to evcc-smart-limit. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.2.0 — 2026-11-20
 
 ### Added
 

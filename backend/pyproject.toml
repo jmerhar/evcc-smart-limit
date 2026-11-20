@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "evcc-smart-limit"
-version = "0.1.1"
+version = "0.2.0"
 description = "Keeps an evcc charging point's smart cost limit at the price of the cheapest hours of a rolling window"
 requires-python = ">=3.14"
 license = "MIT"
