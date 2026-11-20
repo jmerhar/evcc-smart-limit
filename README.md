@@ -40,6 +40,25 @@ It leaves the limit alone when:
 Last week's prices only roughly predict the coming ones: when prices trend up it lets fewer hours
 through than intended, when they trend down more. Including the forecast softens this.
 
+### Urgency
+
+Optional, with `URGENCY_START` and `URGENCY_FLOOR` (charge levels in percent, e.g. 50 and 20).
+Above the start level nothing changes. Below it, the hours asked for grow towards the whole window,
+slowly at first and quickly near the floor (the gap closes with the cube of how far the charge
+level has fallen from the start to the floor). At the floor the limit is the highest price in the
+window, so the car charges at any known price.
+
+After prices rise, the limit lags until the cheaper days leave the window; urgency lets an emptying
+car accept the new prices instead of waiting for that. An example, a car that needs 10 hours over a
+190-hour window, with 50 and 20:
+
+| Charge level | 50% | 45% | 40% | 35% | 30% | 25% | 20% |
+|---|---|---|---|---|---|---|---|
+| Hours asked for | 10 | 11 | 17 | 32 | 63 | 114 | 190 |
+
+evcc's own minimum charge level still applies, and works as a backstop for when this tool steps
+aside or isn't running: set it below `URGENCY_FLOOR`.
+
 ## Requirements
 
 - evcc 0.317 or newer (its price history API), with a dynamic grid tariff. evcc has stored prices since 0.312, so the window is full from the first start if evcc ran that long.
@@ -86,6 +105,7 @@ write: new limit | limit 0.21874 | charge level 60% (24.0 kWh to go) | cheapest 
 | `CHARGE_POWER_KW` | from evcc | charging power; by default the charging point's maximum current × phases × 230 V |
 | `MIN_CHANGE` | `0.002` | the smallest change worth writing, in your currency per kWh |
 | `SOC_MAX_AGE_HOURS` | `6` | how long a last known charge level stays usable |
+| `URGENCY_START`, `URGENCY_FLOOR` | none | turn on [urgency](#urgency): the charge level where it starts and the one where any price passes; both or neither |
 | `INTERVAL_SECONDS` | `900` | time between decisions |
 | `DRY_RUN` | `false` | log decisions, write nothing |
 | `HEARTBEAT_URL` / `HEARTBEAT_URL_FILE` | none | a push monitor (e.g. Uptime Kuma), called after each cycle that reached evcc |

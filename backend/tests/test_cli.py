@@ -97,3 +97,30 @@ def test_main_run_calls_run(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("DRY_RUN", "true")
     assert cli.main(["run"]) == 0
     assert called == [True]
+
+
+@pytest.mark.parametrize(
+    ("env", "message"),
+    [
+        ({"URGENCY_START": "50"}, "set both URGENCY_START and URGENCY_FLOOR"),
+        ({"URGENCY_FLOOR": "20"}, "set both URGENCY_START and URGENCY_FLOOR"),
+        ({"URGENCY_START": "20", "URGENCY_FLOOR": "20"}, "URGENCY_FLOOR must be below"),
+    ],
+)
+def test_urgency_settings_are_checked(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+    env: dict,
+    message: str,  # noqa: ANN001
+) -> None:
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    assert cli.main(["once"]) == 2
+    assert message in capsys.readouterr().err
+
+
+def test_urgency_settings_reach_the_parameters(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("URGENCY_START", "50")
+    monkeypatch.setenv("URGENCY_FLOOR", "20")
+    params = Settings().parameters()
+    assert (params.urgency_start, params.urgency_floor) == (50, 20)

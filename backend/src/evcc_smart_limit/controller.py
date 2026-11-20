@@ -29,7 +29,8 @@ def describe(decision: Decision) -> str:
     if decision.soc is not None and decision.energy_kwh is not None:
         parts.append(f"charge level {decision.soc:g}% ({decision.energy_kwh:.1f} kWh to go)")
     if decision.hours is not None and decision.window_hours is not None:
-        parts.append(f"cheapest {decision.hours:.1f} h of {decision.window_hours:.0f} h")
+        urgency = f", urgency {decision.urgency:.0%}" if decision.urgency else ""
+        parts.append(f"cheapest {decision.hours:.1f} h of {decision.window_hours:.0f} h{urgency}")
     if decision.limit is not None:
         slot = decision.next_slot
         parts.append(

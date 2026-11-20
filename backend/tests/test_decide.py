@@ -13,7 +13,9 @@ from evcc_smart_limit.decide import (
     Parameters,
     charge_power_kw,
     decide,
+    hours_wanted,
     round_up,
+    urgency,
 )
 from evcc_smart_limit.prices import build_window
 
@@ -189,3 +191,53 @@ def test_configured_capacity_wins_over_the_vehicle() -> None:
     params = replace(PARAMS, capacity_kwh=40)
     decision = decide(loadpoint(capacity_kwh=100), WINDOW, Memory(), params, NOW)
     assert decision.energy_kwh == 20
+
+
+URGENT = replace(PARAMS, urgency_start=50, urgency_floor=20, min_hours=0)
+
+
+@pytest.mark.parametrize(
+    ("soc", "expected"), [(60, 0.0), (50, 0.0), (35, 0.5), (20, 1.0), (10, 1.0)]
+)
+def test_urgency_runs_from_the_start_to_the_floor(soc: float, expected: float) -> None:
+    assert urgency(soc, URGENT) == pytest.approx(expected)
+
+
+def test_urgency_is_off_unless_both_levels_are_set() -> None:
+    assert urgency(10, PARAMS) == 0
+    assert urgency(10, replace(PARAMS, urgency_start=50)) == 0
+    assert urgency(10, replace(PARAMS, urgency_floor=20)) == 0
+
+
+def test_hours_wanted_closes_the_gap_with_the_cube_of_urgency() -> None:
+    # base 8 h of a 100 h window; halfway to the floor closes an eighth of the 92 h gap
+    assert hours_wanted(8, 50, URGENT, 100) == 8
+    assert hours_wanted(8, 35, URGENT, 100) == pytest.approx(8 + 92 / 8)
+    assert hours_wanted(8, 20, URGENT, 100) == 100
+
+
+def test_hours_wanted_keeps_factor_min_hours_and_the_window_cap() -> None:
+    params = replace(PARAMS, factor=2, min_hours=3)
+    assert hours_wanted(1, 70, params, 100) == 3
+    assert hours_wanted(5, 70, params, 100) == 10
+    assert hours_wanted(80, 70, params, 100) == 100
+
+
+def test_at_the_floor_any_price_in_the_window_passes() -> None:
+    decision = decide(loadpoint(soc=20), WINDOW, Memory(), URGENT, NOW)
+    assert decision.urgency == 1
+    assert decision.hours == decision.window_hours
+    assert decision.limit == 0.3  # the window's highest price
+
+
+def test_above_the_start_urgency_changes_nothing() -> None:
+    plain = decide(
+        loadpoint(soc=80),
+        WINDOW,
+        Memory(),
+        replace(URGENT, urgency_start=None, urgency_floor=None),
+        NOW,
+    )
+    urgent = decide(loadpoint(soc=80), WINDOW, Memory(), URGENT, NOW)
+    assert urgent.urgency == 0
+    assert (urgent.hours, urgent.limit) == (plain.hours, plain.limit)

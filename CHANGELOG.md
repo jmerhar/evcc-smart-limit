@@ -3,6 +3,14 @@
 Notable changes to evcc-smart-limit. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Urgency (`URGENCY_START`, `URGENCY_FLOOR`): below the start level the limit widens towards any
+  price, which it reaches at the floor, so an emptying car accepts the current prices instead of
+  waiting for older, cheaper days to leave the window. Off unless both are set.
+
 ## 0.1.1 — 2026-11-15
 
 ### Added

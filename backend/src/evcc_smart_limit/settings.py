@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import Self
 
 from jigkit.settings import AppSettings
-from pydantic import Field
+from pydantic import Field, model_validator
 
 from evcc_smart_limit.decide import Parameters
 
@@ -31,6 +32,10 @@ class Settings(AppSettings):
     charge_power_kw: float | None = Field(None, gt=0)
     min_change: float = Field(0.002, ge=0)
     soc_max_age_hours: float = Field(6.0, ge=0)
+    #: Urgency (both or neither): below URGENCY_START the limit widens towards any price, which it
+    #: reaches at URGENCY_FLOOR, both charge levels in percent.
+    urgency_start: float | None = Field(None, gt=0, le=100)
+    urgency_floor: float | None = Field(None, ge=0, lt=100)
     #: Seconds between decisions.
     interval_seconds: int = Field(900, ge=60)
     #: Log decisions without writing anything to evcc.
@@ -39,6 +44,16 @@ class Settings(AppSettings):
     #: A push monitor's URL, called after each decision that reached evcc.
     heartbeat_url: str | None = None
     heartbeat_url_file: str | None = None
+
+    @model_validator(mode="after")
+    def _urgency_levels(self) -> Self:
+        """Urgency needs both levels, with the floor below the start."""
+        start, floor = self.urgency_start, self.urgency_floor
+        if (start is None) != (floor is None):
+            raise ValueError("set both URGENCY_START and URGENCY_FLOOR, or neither")
+        if start is not None and floor is not None and floor >= start:
+            raise ValueError("URGENCY_FLOOR must be below URGENCY_START")
+        return self
 
     def parameters(self) -> Parameters:
         """The decision parameters these settings describe."""
@@ -51,5 +66,7 @@ class Settings(AppSettings):
             charge_power_kw=self.charge_power_kw,
             min_change=self.min_change,
             soc_max_age=timedelta(hours=self.soc_max_age_hours),
+            urgency_start=self.urgency_start,
+            urgency_floor=self.urgency_floor,
             dry_run=self.dry_run,
         )

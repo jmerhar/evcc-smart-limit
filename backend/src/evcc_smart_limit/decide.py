@@ -56,6 +56,10 @@ class Parameters:
     charge_power_kw: float | None = None
     min_change: float = 0.002
     soc_max_age: timedelta = timedelta(hours=6)
+    #: Urgency, on when both are set: below ``urgency_start`` the hours asked for grow towards the
+    #: whole window, which they reach at ``urgency_floor``.
+    urgency_start: float | None = None
+    urgency_floor: float | None = None
     dry_run: bool = False
 
 
@@ -84,6 +88,7 @@ class Decision:
     soc: float | None = None
     energy_kwh: float | None = None
     hours: float | None = None
+    urgency: float = 0.0
     window_hours: float | None = None
     next_slot: Slot | None = None
 
@@ -102,6 +107,29 @@ def round_up(price: float) -> float:
     # The small allowance keeps a price that is already exact (0.25 stored as 0.25000000000000006)
     # from being bumped to the next step.
     return math.ceil(price * scale - 1e-6) / scale
+
+
+def urgency(soc: float, params: Parameters) -> float:
+    """How far the charge level has fallen from ``urgency_start`` towards ``urgency_floor``.
+
+    0 at or above the start (and whenever urgency is off), 1 at or below the floor.
+    """
+    start, floor = params.urgency_start, params.urgency_floor
+    if start is None or floor is None or soc >= start:
+        return 0.0
+    return min(1.0, (start - soc) / (start - floor))
+
+
+def hours_wanted(needed: float, soc: float, params: Parameters, window_hours: float) -> float:
+    """The hours whose price becomes the limit.
+
+    The charging time ``needed``, times ``factor`` and at least ``min_hours``. With urgency, the
+    gap between that and the whole window closes with the cube of :func:`urgency`: little at
+    first, then quickly near the floor, where the whole window is asked for and any known price
+    passes.
+    """
+    base = min(max(params.min_hours, needed * params.factor), window_hours)
+    return base + (window_hours - base) * urgency(soc, params) ** 3
 
 
 def _same(a: float | None, b: float | None) -> bool:
@@ -174,7 +202,7 @@ def decide(
 
     energy = max(0.0, lp.limit_soc - soc) / 100 * capacity
     needed = energy / (charge_power_kw(lp, params) * params.efficiency)
-    hours = min(max(params.min_hours, needed * params.factor), window.hours)
+    hours = hours_wanted(needed, soc, params, window.hours)
     price = cheapest_hours_price(window.slots, hours)
     assert price is not None  # the window has slots
     limit = round_up(price)
@@ -184,6 +212,7 @@ def decide(
         "soc": soc,
         "energy_kwh": energy,
         "hours": hours,
+        "urgency": urgency(soc, params),
         "window_hours": window.hours,
         "next_slot": next_slot_at_or_below(window.future, limit),
     }

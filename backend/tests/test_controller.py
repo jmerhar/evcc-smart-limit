@@ -134,3 +134,18 @@ async def test_forecast_hours_reach_the_window(fake: FakeEvcc, tmp_path: Path, h
     async with fake.client() as client:
         decision = await controller(fake, client, tmp_path, [], window_days=1).decide()
     assert decision.window_hours == 24 + hours
+
+
+def test_describe_shows_urgency_when_there_is_some() -> None:
+    text = describe(
+        Decision(
+            Action.WRITE,
+            "new limit",
+            Memory(),
+            limit=0.3,
+            hours=63.4,
+            urgency=0.6667,
+            window_hours=190,
+        )
+    )
+    assert "cheapest 63.4 h of 190 h, urgency 67%" in text
