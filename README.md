@@ -56,8 +56,12 @@ car accept the new prices instead of waiting for that. An example, a car that ne
 |---|---|---|---|---|---|---|---|
 | Hours asked for | 10 | 11 | 17 | 32 | 63 | 114 | 190 |
 
-evcc's own minimum charge level still applies, and works as a backstop for when this tool steps
-aside or isn't running: set it below `URGENCY_FLOOR`.
+evcc's own minimum charge level still applies: below it evcc charges at full power at any price,
+up to the minimum, and then hands back to the limit. It can serve as a backstop for when this tool
+steps aside or isn't running, set below `URGENCY_FLOOR`. While the vehicle's charge level is
+unknown, though, evcc counts the minimum as energy charged since plug-in, and forces that much at
+any price on every plug-in; with an unreliable charge level, leave it at 0% and monitor this tool
+(`HEARTBEAT_URL`) instead.
 
 ## Requirements
 
