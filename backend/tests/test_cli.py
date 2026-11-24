@@ -5,20 +5,28 @@ from __future__ import annotations
 import asyncio
 import os
 import signal
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import httpx2
 import pytest
 
 from evcc_smart_limit import cli
+from evcc_smart_limit.prices import slot_start
 from evcc_smart_limit.settings import Settings
 
-from .conftest import FakeEvcc
+from .conftest import FakeEvcc, history_rows, rate_rows
 
 
 @pytest.fixture
 def wired(fake: FakeEvcc, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> FakeEvcc:
-    """Route the command's HTTP client to the fake evcc, with its data in a temporary directory."""
+    """Route the command's HTTP client to the fake evcc, with its data in a temporary directory.
+
+    The commands read the real clock, so the fake's prices are moved to the current slot.
+    """
+    now = slot_start(datetime.now(UTC))
+    fake.history = history_rows(now - timedelta(days=1), [0.30] * 96)
+    fake.rates = rate_rows(now, [0.30] * 96)
     transport = httpx2.MockTransport(fake.handler)
     real = httpx2.AsyncClient
     monkeypatch.setattr(cli.httpx2, "AsyncClient", lambda: real(transport=transport))
