@@ -6,6 +6,7 @@ import json
 from datetime import timedelta
 from pathlib import Path
 
+import httpx2
 import pytest
 
 from evcc_smart_limit import memory as store
@@ -16,13 +17,21 @@ from evcc_smart_limit.evcc import Evcc
 from .conftest import NOW, FakeEvcc, history_rows, rate_rows, slots
 
 
-def controller(fake: FakeEvcc, client, tmp_path: Path, beats: list, **params) -> Controller:  # noqa: ANN001
+def controller(  # noqa: ANN201
+    fake: FakeEvcc,
+    client,  # noqa: ANN001
+    tmp_path: Path,
+    beats: list,
+    record_status: bool = False,
+    **params,  # noqa: ANN003
+):
     return Controller(
         Evcc(client, "http://evcc.test"),
         1,
         Parameters(**params),
         tmp_path,
         on_success=lambda: beats.append(1),
+        record_status=record_status,
         clock=lambda: NOW,
     )
 
@@ -31,10 +40,10 @@ async def test_writes_the_limit_and_remembers_it(fake: FakeEvcc, tmp_path: Path)
     fake.history = history_rows(NOW - timedelta(days=1), [0.10] * 8 + [0.30] * 88)
     beats: list = []
     async with fake.client() as client:
-        decision = await controller(fake, client, tmp_path, beats).tick()
+        decision = await controller(fake, client, tmp_path, beats, record_status=True).tick()
     assert decision is not None and decision.action is Action.WRITE
     assert fake.posts == ["/api/loadpoints/1/smartcostlimit/0.30000"]
-    assert store.load(tmp_path / MEMORY_FILE).last_written == 0.3
+    assert store.load(tmp_path / MEMORY_FILE, 1).last_written == 0.3
     assert json.loads((tmp_path / STATUS_FILE).read_text())["action"] == "write"
     assert beats == [1]
 
@@ -56,7 +65,7 @@ async def test_a_dry_run_writes_nothing_to_evcc(fake: FakeEvcc, tmp_path: Path, 
         decision = await controller(fake, client, tmp_path, beats, dry_run=True).tick()
     assert decision is not None and decision.action is Action.WRITE
     assert fake.posts == []
-    assert store.load(tmp_path / MEMORY_FILE).last_written is None
+    assert store.load(tmp_path / MEMORY_FILE, 1).last_written is None
     assert "dry run, write: new limit" in caplog.text
 
 
@@ -74,16 +83,80 @@ async def test_evcc_failing_leaves_everything_as_it_was(
     assert "evcc: GET /api/tariff/grid: HTTP 500" in caplog.text
 
 
-async def test_a_failed_write_is_not_remembered(fake: FakeEvcc, tmp_path: Path) -> None:
+async def test_a_failed_write_stays_pending(fake: FakeEvcc, tmp_path: Path) -> None:
     fake.fail = {"/api/loadpoints": 500}
     beats: list = []
     async with fake.client() as client:
         assert await controller(fake, client, tmp_path, beats).tick() is None
-    assert not (tmp_path / MEMORY_FILE).exists()
+    memory = store.load(tmp_path / MEMORY_FILE, 1)
+    assert (memory.last_written, memory.pending) == (None, 0.3)
+    assert beats == []
+
+
+async def test_a_write_whose_answer_was_lost_is_not_a_manual_change(
+    fake: FakeEvcc, tmp_path: Path
+) -> None:
+    # evcc applies the limit but the answer never arrives.
+    def applied_then_lost(request: httpx2.Request) -> httpx2.Response:
+        if request.method == "POST":
+            fake.handler(request)
+            raise httpx2.ReadTimeout("lost", request=request)
+        return fake.handler(request)
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(applied_then_lost)) as client:
+        ctl = controller(fake, client, tmp_path, [])
+        assert await ctl.tick() is None
+        second = await ctl.tick()
+    assert second is not None and second.action is Action.KEEP
+    memory = store.load(tmp_path / MEMORY_FILE, 1)
+    assert (memory.last_written, memory.pending, memory.paused) == (0.3, None, False)
+
+
+async def test_the_optimizer_owning_the_limit_is_a_skip(fake: FakeEvcc, tmp_path: Path) -> None:
+    fake.fail = {"/api/loadpoints": 409}
+    beats: list = []
+    async with fake.client() as client:
+        decision = await controller(fake, client, tmp_path, beats).tick()
+    assert decision is not None and decision.action is Action.SKIP
+    assert decision.reason == "evcc's optimizer controls this charging point"
+    assert store.load(tmp_path / MEMORY_FILE, 1).pending is None
+    assert beats == [1]
+
+
+async def test_a_planner_tariff_other_than_the_grid_price_is_a_skip(
+    fake: FakeEvcc, tmp_path: Path
+) -> None:
+    fake.planner = rate_rows(NOW, [500.0] * 96)  # e.g. CO2 in g/kWh
+    async with fake.client() as client:
+        decision = await controller(fake, client, tmp_path, []).decide()
+    assert decision.action is Action.SKIP
+    assert "planner tariff" in decision.reason
+    assert fake.posts == []
+
+
+async def test_no_planner_tariff_is_a_skip(fake: FakeEvcc, tmp_path: Path) -> None:
+    fake.fail = {"/api/tariff/planner": 404}
+    async with fake.client() as client:
+        decision = await controller(fake, client, tmp_path, []).decide()
+    assert decision.action is Action.SKIP and "planner tariff" in decision.reason
+
+
+async def test_the_planner_tariff_failing_otherwise_is_an_error(
+    fake: FakeEvcc, tmp_path: Path
+) -> None:
+    fake.fail = {"/api/tariff/planner": 500}
+    async with fake.client() as client:
+        assert await controller(fake, client, tmp_path, []).tick() is None
+
+
+async def test_only_the_service_records_its_status(fake: FakeEvcc, tmp_path: Path) -> None:
+    async with fake.client() as client:
+        await controller(fake, client, tmp_path, []).tick()
+    assert not (tmp_path / STATUS_FILE).exists()
 
 
 async def test_decide_reads_the_memory_file(fake: FakeEvcc, tmp_path: Path) -> None:
-    store.save(tmp_path / MEMORY_FILE, Memory(last_written=0.25))
+    store.save(tmp_path / MEMORY_FILE, Memory(last_written=0.25), 1)
     fake.loadpoints[0]["smartCostLimit"] = 0.4
     async with fake.client() as client:
         decision = await controller(fake, client, tmp_path, []).decide()

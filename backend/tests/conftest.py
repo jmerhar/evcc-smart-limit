@@ -48,6 +48,8 @@ class FakeEvcc:
     vehicles: dict = field(default_factory=dict)
     history: list[dict] = field(default_factory=list)
     rates: list[dict] = field(default_factory=list)
+    #: The planner forecast; None serves the grid forecast, as evcc does for a price tariff.
+    planner: list[dict] | None = None
     fail: dict[str, int] = field(default_factory=dict)  # path prefix -> status code
     posts: list[str] = field(default_factory=list)
     requests: list[httpx2.Request] = field(default_factory=list)
@@ -66,6 +68,8 @@ class FakeEvcc:
             body = [r for r in self.history if datetime.fromisoformat(r["start"]) >= since]
         elif path == "/api/tariff/grid":
             body = {"rates": self.rates}
+        elif path == "/api/tariff/planner":
+            body = {"rates": self.rates if self.planner is None else self.planner}
         elif request.method == "POST" and "/smartcostlimit/" in path:
             self.posts.append(path)
             value = float(path.rsplit("/", 1)[1])
@@ -92,9 +96,10 @@ def evcc_loadpoint(**overrides: object) -> dict:
         "effectiveLimitSoc": 100,
         "smartCostLimit": None,
         "vehicleName": "db:1",
-        "vehicleCapacity": None,
         "maxCurrent": 16,
-        "phasesConfigured": 3,
+        "phasesActive": 3,
+        "vehicleOdometer": 1000.0,
+        "chargedEnergy": 0,
     }
     values.update(overrides)
     return values

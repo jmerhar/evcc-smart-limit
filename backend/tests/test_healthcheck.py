@@ -15,7 +15,6 @@ from evcc_smart_limit.controller import STATUS_FILE
 @pytest.fixture(autouse=True)
 def data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    monkeypatch.setenv("INTERVAL_SECONDS", "900")
     return tmp_path
 
 

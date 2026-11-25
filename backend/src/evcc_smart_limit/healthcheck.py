@@ -10,7 +10,7 @@ import json
 import sys
 from datetime import UTC, datetime, timedelta
 
-from evcc_smart_limit.controller import STATUS_FILE
+from evcc_smart_limit.controller import INTERVAL_SECONDS, STATUS_FILE
 from evcc_smart_limit.settings import Settings
 
 
@@ -24,7 +24,7 @@ def main() -> int:
         print(f"unhealthy: no usable status file ({error})", file=sys.stderr)
         return 1
     age = datetime.now(UTC) - at
-    if age > timedelta(seconds=3 * settings.interval_seconds):
+    if age > timedelta(seconds=3 * INTERVAL_SECONDS):
         print(f"unhealthy: last successful cycle {age} ago", file=sys.stderr)
         return 1
     return 0

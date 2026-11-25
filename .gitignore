@@ -29,3 +29,6 @@ coverage-upload/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Credentials a deployment mounts (an evcc API key, a push URL)
+secrets/

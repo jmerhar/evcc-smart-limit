@@ -3,6 +3,45 @@
 Notable changes to evcc-smart-limit. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Added
+
+- Images for arm64 (e.g. Raspberry Pi) as well as amd64.
+- Stays out of the way, with a clear log line, when evcc's optimizer controls the charging point
+  or evcc charges by a planner tariff other than the grid price.
+- Refuses to start when the data directory isn't writable, instead of failing after writing a
+  limit.
+
+### Changed
+
+- The charging power takes the phases evcc expects to be active and the vehicle's own maximum
+  current into account, so a car that charges on fewer phases than the charging point offers is
+  given the hours it really needs.
+- `EVCC_URL` defaults to `http://evcc:7070`, the usual address from a container next to evcc.
+- The example compose file keeps the data in a named volume and starts in dry-run mode.
+- Fewer settings: `EFFICIENCY`, `SOC_MAX_AGE_HOURS`, `INTERVAL_SECONDS` and `MIN_CHANGE` are gone
+  (fixed at 90%, 6 hours and 15 minutes; a change is written when it moves the limit by more than
+  0.5%, which suits any currency). Old values are ignored.
+- The README is reorganised around installing and using it, with the settings in three groups and
+  a troubleshooting table.
+
+### Fixed
+
+- A write whose answer from evcc was lost no longer looks like a manual change the next time.
+- A manual-override pause also ends when the car was driven or a new session started between two
+  decisions, not only when the car was seen unplugged.
+- The car's last known charge level is forgotten when it is unplugged, so a car that comes back
+  with an unknown charge level isn't taken to be as full as when it left.
+- `once` shows a manual-override pause instead of the limit it would otherwise set.
+- The memory file belongs to one charging point; another one's, or a malformed one, starts fresh.
+- The health check waits for the current run's first decision instead of trusting a status file
+  left by an earlier run or by `once --apply`.
+- An unexpected answer from evcc is reported as such instead of ending the command with a
+  traceback.
+- `backtest` aligns its start to a quarter hour, takes times without a UTC offset as `TZ`, and
+  reports a malformed CSV or an end before the start.
+
 ## 0.2.0 — 2026-11-20
 
 ### Added

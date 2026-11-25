@@ -132,3 +132,35 @@ def test_urgency_settings_reach_the_parameters(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setenv("URGENCY_FLOOR", "20")
     params = Settings().parameters()
     assert (params.urgency_start, params.urgency_floor) == (50, 20)
+
+
+def test_run_refuses_a_data_directory_it_cannot_write(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,  # noqa: ANN001
+) -> None:
+    locked = tmp_path / "locked"
+    locked.mkdir()
+    locked.chmod(0o500)
+    monkeypatch.setenv("DATA_DIR", str(locked))
+    ran = []
+    monkeypatch.setattr(cli, "run", lambda settings: ran.append(1))
+    try:
+        assert cli.main(["run"]) == 2
+    finally:
+        locked.chmod(0o700)
+    assert ran == []
+    assert f"cannot write to {locked}" in capsys.readouterr().err
+
+
+def test_run_removes_a_stale_status_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    (tmp_path / "status.json").write_text('{"at": "2026-11-15T12:00:00+00:00"}')
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+
+    async def fake_run(settings: Settings) -> None:
+        pass
+
+    monkeypatch.setattr(cli, "run", fake_run)
+    assert cli.main(["run"]) == 0
+    assert not (tmp_path / "status.json").exists()
+    assert not (tmp_path / ".write-test").exists()

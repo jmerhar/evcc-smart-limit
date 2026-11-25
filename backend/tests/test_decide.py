@@ -14,6 +14,7 @@ from evcc_smart_limit.decide import (
     charge_power_kw,
     decide,
     hours_wanted,
+    new_session,
     round_up,
     urgency,
 )
@@ -150,11 +151,12 @@ def test_the_limit_written_counts_as_unchanged() -> None:
     assert decision.action is Action.KEEP
 
 
-def test_a_dry_run_ignores_manual_changes() -> None:
+def test_a_dry_run_respects_a_manual_pause() -> None:
     params = replace(PARAMS, dry_run=True)
     memory = Memory(last_written=0.3, paused=True)
     decision = decide(loadpoint(smart_cost_limit=0.5), WINDOW, memory, params, NOW)
-    assert decision.action is Action.WRITE
+    assert decision.action is Action.SKIP
+    assert decision.reason.startswith("limit changed by hand; paused")
 
 
 def test_the_charge_level_is_remembered_and_used_while_fresh() -> None:
@@ -174,10 +176,91 @@ def test_the_charge_level_is_remembered_and_used_while_fresh() -> None:
     )
 
 
-def test_a_limit_exactly_min_change_away_is_kept() -> None:
-    params = replace(PARAMS, min_change=0.0)
-    decision = decide(loadpoint(smart_cost_limit=0.3), WINDOW, Memory(), params, NOW)
+@pytest.mark.parametrize(
+    ("current", "action"),
+    [
+        (0.3, Action.KEEP),
+        (0.3015, Action.KEEP),
+        (0.299, Action.KEEP),
+        (0.302, Action.WRITE),
+        (0.297, Action.WRITE),
+    ],
+)
+def test_changes_below_half_a_percent_are_not_written(current: float, action: Action) -> None:
+    decision = decide(loadpoint(smart_cost_limit=current), WINDOW, Memory(), PARAMS, NOW)
+    assert decision.limit == 0.3
+    assert decision.action is action
+
+
+def test_a_limit_of_zero_matches_a_current_zero() -> None:
+    free = build_window(slots(NOW - timedelta(days=1), [0.0] * 96), [], NOW, days=1)
+    decision = decide(loadpoint(smart_cost_limit=0.0), free, Memory(), PARAMS, NOW)
+    assert (decision.limit, decision.action) == (0.0, Action.KEEP)
+
+
+def test_a_pending_write_found_in_evcc_counts_as_written() -> None:
+    memory = Memory(last_written=0.25, pending=0.3)
+    decision = decide(loadpoint(smart_cost_limit=0.3), WINDOW, memory, PARAMS, NOW)
     assert decision.action is Action.KEEP
+    assert (decision.memory.last_written, decision.memory.pending) == (0.3, None)
+
+
+def test_the_old_limit_still_in_evcc_after_a_failed_write_is_not_a_manual_change() -> None:
+    memory = Memory(last_written=0.25, pending=0.3)
+    decision = decide(loadpoint(smart_cost_limit=0.25), WINDOW, memory, PARAMS, NOW)
+    assert decision.action is Action.WRITE
+    assert (decision.memory.last_written, decision.memory.pending) == (0.25, None)
+
+
+def test_a_limit_matching_neither_written_nor_pending_pauses() -> None:
+    memory = Memory(last_written=0.25, pending=0.3)
+    decision = decide(loadpoint(smart_cost_limit=0.4), WINDOW, memory, PARAMS, NOW)
+    assert decision.memory.paused and decision.memory.pending is None
+
+
+def test_unplugging_forgets_the_charge_level() -> None:
+    memory = Memory(last_soc=90, last_soc_at=NOW)
+    gone = decide(loadpoint(connected=False, soc=None), WINDOW, memory, PARAMS, NOW)
+    assert gone.memory.last_soc is None
+    back = decide(loadpoint(soc=None), WINDOW, gone.memory, PARAMS, NOW + timedelta(hours=1))
+    assert back.reason == "charge level unknown"
+
+
+def test_a_drive_between_two_decisions_is_a_new_session() -> None:
+    memory = Memory(
+        last_written=0.3, paused=True, last_soc=90, last_soc_at=NOW, last_odometer_km=1000
+    )
+    lp = loadpoint(smart_cost_limit=0.5, soc=None, odometer_km=1012)
+    decision = decide(lp, WINDOW, memory, PARAMS, NOW + timedelta(minutes=15))
+    assert not decision.memory.paused
+    assert decision.memory.last_soc is None and decision.memory.last_odometer_km == 1012
+    assert decision.reason == "charge level unknown"
+
+
+def test_a_restarted_session_energy_is_a_new_session() -> None:
+    memory = Memory(last_written=0.3, paused=True, last_session_kwh=4.0)
+    decision = decide(loadpoint(smart_cost_limit=0.5, session_kwh=0.0), WINDOW, memory, PARAMS, NOW)
+    assert not decision.memory.paused
+    assert decision.action is Action.WRITE
+
+
+def test_standing_still_is_the_same_session() -> None:
+    memory = Memory(last_written=0.3, paused=True, last_odometer_km=1000, last_session_kwh=4.0)
+    lp = loadpoint(smart_cost_limit=0.5, odometer_km=1000.3, session_kwh=4.2)
+    decision = decide(lp, WINDOW, memory, PARAMS, NOW)
+    assert decision.memory.paused
+    assert decision.memory.last_odometer_km == 1000.3
+
+
+def test_an_unknown_odometer_keeps_the_last_one() -> None:
+    memory = Memory(last_odometer_km=1000)
+    decision = decide(loadpoint(odometer_km=None), WINDOW, memory, PARAMS, NOW)
+    assert decision.memory.last_odometer_km == 1000
+
+
+def test_new_session_needs_a_connected_vehicle() -> None:
+    memory = Memory(last_odometer_km=1000)
+    assert not new_session(loadpoint(connected=False, odometer_km=2000), memory)
 
 
 def test_a_vehicle_above_its_limit_needs_nothing() -> None:

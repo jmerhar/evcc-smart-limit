@@ -15,14 +15,14 @@ import argparse
 import csv
 import sys
 from dataclasses import dataclass, replace
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta, tzinfo
 from pathlib import Path
 
 import httpx2
 
 from evcc_smart_limit.decide import Action, Loadpoint, Memory, Parameters, decide
 from evcc_smart_limit.evcc import Evcc, EvccError
-from evcc_smart_limit.prices import HISTORY_SLOT, Slot, build_window
+from evcc_smart_limit.prices import HISTORY_SLOT, Slot, build_window, slot_start
 from evcc_smart_limit.settings import Settings
 
 
@@ -51,18 +51,25 @@ class Result:
         return self.cost / self.kwh if self.kwh else None
 
 
-def read_csv(path: Path) -> list[Reading]:
+def aware(at: datetime, zone: tzinfo) -> datetime:
+    """``at`` with ``zone`` attached when it carries no UTC offset of its own."""
+    return at if at.tzinfo is not None else at.replace(tzinfo=zone)
+
+
+def read_csv(path: Path, zone: tzinfo = UTC) -> list[Reading]:
     """Readings from a CSV with columns ``time`` (ISO 8601), ``soc`` and optionally ``connected``.
 
     ``connected`` takes 1/0 or true/false; without the column the vehicle counts as connected
-    throughout.
+    throughout. Times without a UTC offset are in ``zone``.
     """
     readings = []
     with path.open(newline="", encoding="utf-8") as f:
         for row in csv.DictReader(f):
             connected = str(row.get("connected", "1")).strip().lower() in ("1", "true", "yes")
             readings.append(
-                Reading(datetime.fromisoformat(row["time"]), float(row["soc"]), connected)
+                Reading(
+                    aware(datetime.fromisoformat(row["time"]), zone), float(row["soc"]), connected
+                )
             )
     return sorted(readings, key=lambda r: r.at)
 
@@ -148,8 +155,12 @@ def add_parser(commands: argparse._SubParsersAction) -> None:
     p.add_argument("--from", dest="start", required=True, type=datetime.fromisoformat)
     p.add_argument("--to", dest="end", required=True, type=datetime.fromisoformat)
     p.add_argument("--soc", required=True, type=Path, help="CSV with time, soc[, connected]")
-    p.add_argument("--forecast-hours", type=float, default=24.0)
-    p.add_argument("--limit-soc", type=float, default=100.0)
+    p.add_argument(
+        "--forecast-hours", type=float, default=24.0, help="hours of prices known ahead (24)"
+    )
+    p.add_argument(
+        "--limit-soc", type=float, default=100.0, help="the vehicle's charge limit in %% (100)"
+    )
 
 
 def _line(name: str, result: Result) -> str:
@@ -171,8 +182,17 @@ async def main(settings: Settings, args: argparse.Namespace) -> int:
     if not settings.capacity_kwh or not settings.charge_power_kw:
         print("backtest needs CAPACITY_KWH and CHARGE_POWER_KW", file=sys.stderr)
         return 2
-    readings = read_csv(args.soc)
-    since = args.start - timedelta(days=params.window_days) - HISTORY_SLOT
+    zone = settings.zone
+    start, end = slot_start(aware(args.start, zone)), aware(args.end, zone)
+    if end <= start:
+        print("--to must be after --from", file=sys.stderr)
+        return 2
+    try:
+        readings = read_csv(args.soc, zone)
+    except (OSError, KeyError, ValueError) as error:
+        print(f"cannot read {args.soc}: {error}", file=sys.stderr)
+        return 2
+    since = start - timedelta(days=params.window_days) - HISTORY_SLOT
     async with httpx2.AsyncClient() as client:
         try:
             prices = await Evcc(client, settings.evcc_url, settings.evcc_api_key).history(since)
@@ -182,8 +202,8 @@ async def main(settings: Settings, args: argparse.Namespace) -> int:
     controller, baseline = simulate(
         prices,
         readings,
-        args.start,
-        args.end,
+        start,
+        end,
         params,
         settings.capacity_kwh,
         settings.charge_power_kw,

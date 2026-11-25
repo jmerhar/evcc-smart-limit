@@ -19,6 +19,12 @@ LIMIT_DECIMALS = 5
 #: Volts per phase, for estimating the charging power from the charging point's current.
 PHASE_VOLTS = 230.0
 
+#: A drive of more than this many kilometres between two decisions means the vehicle was away.
+ODOMETER_STEP_KM = 0.5
+
+#: A drop of more than this in the energy charged in the session means a new session began.
+SESSION_ENERGY_STEP_KWH = 0.05
+
 
 class Action(StrEnum):
     """What the caller does with a decision."""
@@ -42,6 +48,8 @@ class Loadpoint:
     capacity_kwh: float | None
     max_current: float
     phases: int
+    odometer_km: float | None = None
+    session_kwh: float | None = None
 
 
 @dataclass(frozen=True)
@@ -54,7 +62,8 @@ class Parameters:
     efficiency: float = 0.9
     capacity_kwh: float | None = None
     charge_power_kw: float | None = None
-    min_change: float = 0.002
+    #: Changes smaller than this share of the limit are not written.
+    min_change_ratio: float = 0.005
     soc_max_age: timedelta = timedelta(hours=6)
     #: Urgency, on when both are set: below ``urgency_start`` the hours asked for grow towards the
     #: whole window, which they reach at ``urgency_floor``.
@@ -67,14 +76,19 @@ class Parameters:
 class Memory:
     """What the controller remembers between decisions (and restarts).
 
-    ``last_written`` is the limit it last set; a different limit in evcc means someone changed it,
-    and the controller then stays out of the way (``paused``) until the vehicle is next connected.
+    ``last_written`` is the limit it last set, and ``pending`` one it is about to set, whose answer
+    from evcc may be lost. A limit in evcc that matches neither means someone changed it, and the
+    controller then stays out of the way (``paused``) until the vehicle is next connected. The
+    other fields recognise a new connection and keep the vehicle's last known charge level.
     """
 
     last_written: float | None = None
+    pending: float | None = None
     paused: bool = False
     last_soc: float | None = None
     last_soc_at: datetime | None = None
+    last_odometer_km: float | None = None
+    last_session_kwh: float | None = None
 
 
 @dataclass(frozen=True)
@@ -94,7 +108,7 @@ class Decision:
 
 
 def charge_power_kw(lp: Loadpoint, params: Parameters) -> float:
-    """The charging power: the configured one, else the charging point's maximum current."""
+    """The charging power: the configured one, else the maximum current on the active phases."""
     if params.charge_power_kw:
         return params.charge_power_kw
     phases = lp.phases if lp.phases in (1, 2, 3) else 3
@@ -139,6 +153,51 @@ def _same(a: float | None, b: float | None) -> bool:
     return abs(a - b) < 1e-6
 
 
+def _close_enough(limit: float, current: float, ratio: float) -> bool:
+    """Whether ``current`` is within ``ratio`` of ``limit``, so writing would change little.
+
+    Relative, so the same setting suits any currency's price scale.
+    """
+    return abs(limit - current) <= ratio * max(abs(limit), abs(current))
+
+
+def new_session(lp: Loadpoint, memory: Memory) -> bool:
+    """Whether the vehicle has been away since the last decision, though it is connected now.
+
+    evcc reports no session identifier, and a quick unplug and replug can fall between two
+    decisions, so a drive (the odometer moved) or a restarted session energy counts as well.
+    """
+    if not lp.connected:
+        return False
+    drove = (
+        lp.odometer_km is not None
+        and memory.last_odometer_km is not None
+        and lp.odometer_km - memory.last_odometer_km > ODOMETER_STEP_KM
+    )
+    restarted = (
+        lp.session_kwh is not None
+        and memory.last_session_kwh is not None
+        and memory.last_session_kwh - lp.session_kwh > SESSION_ENERGY_STEP_KWH
+    )
+    return drove or restarted
+
+
+def _session_ended(memory: Memory) -> Memory:
+    """The memory with everything that belongs to one connection forgotten.
+
+    A manual override ends with the connection, and the charge level of a vehicle that has been
+    driven (or of another vehicle) no longer applies.
+    """
+    return replace(
+        memory,
+        last_written=None,
+        pending=None,
+        paused=False,
+        last_soc=None,
+        last_soc_at=None,
+    )
+
+
 def decide(
     lp: Loadpoint, window: Window, memory: Memory, params: Parameters, now: datetime
 ) -> Decision:
@@ -149,6 +208,13 @@ def decide(
     of history plus the forecast, a coming slot passes when it is among the week's cheapest N
     hours, so a vehicle that needs N hours gets about that many over a week of similar prices.
     """
+    if not lp.connected or new_session(lp, memory):
+        memory = _session_ended(memory)
+    memory = replace(
+        memory,
+        last_odometer_km=lp.odometer_km if lp.odometer_km is not None else memory.last_odometer_km,
+        last_session_kwh=lp.session_kwh,
+    )
     if lp.soc is not None:
         memory = replace(memory, last_soc=lp.soc, last_soc_at=now)
 
@@ -158,29 +224,26 @@ def decide(
     if lp.heating:
         return skip("heating devices are not supported")
     if not lp.connected:
-        # Unplugging ends a manual override: on the next connection the controller takes over
-        # again, whatever the limit is by then.
-        return Decision(
-            Action.SKIP,
-            "vehicle not connected",
-            replace(memory, paused=False, last_written=None),
-        )
+        return skip("vehicle not connected")
     if lp.mode != "smart":
         return skip(f"mode is {lp.mode}, not smart")
     if lp.plan_active:
         return skip("a charging plan is active")
 
-    if not params.dry_run:
-        if memory.paused:
-            return skip("limit changed by hand; paused until the vehicle is next connected")
-        if memory.last_written is not None and not _same(lp.smart_cost_limit, memory.last_written):
-            memory = replace(memory, paused=True)
+    if memory.paused:
+        return skip("limit changed by hand; paused until the vehicle is next connected")
+    expected = [v for v in (memory.last_written, memory.pending) if v is not None]
+    if expected:
+        if not any(_same(lp.smart_cost_limit, v) for v in expected):
+            memory = replace(memory, paused=True, pending=None)
             return Decision(
                 Action.SKIP,
-                f"limit changed by hand (expected {memory.last_written}, found "
+                f"limit changed by hand (expected {expected[0]}, found "
                 f"{lp.smart_cost_limit}); paused until the vehicle is next connected",
                 memory,
             )
+        # Whichever matched is what evcc holds, including a write whose answer was lost.
+        memory = replace(memory, last_written=lp.smart_cost_limit, pending=None)
 
     soc = lp.soc
     if (
@@ -217,7 +280,7 @@ def decide(
         "next_slot": next_slot_at_or_below(window.future, limit),
     }
     current = lp.smart_cost_limit
-    if current is not None and abs(limit - current) <= params.min_change:
+    if current is not None and _close_enough(limit, current, params.min_change_ratio):
         # The limit in evcc stands in for the one this would write, so treat it as written.
         if not params.dry_run:
             memory = replace(memory, last_written=current)

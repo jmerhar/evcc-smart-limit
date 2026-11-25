@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import timedelta
 
 import httpx2
@@ -37,17 +38,76 @@ async def test_loadpoint_fills_gaps_with_defaults(fake: FakeEvcc) -> None:
             vehicleSoc=0,
             effectiveLimitSoc=None,
             vehicleName=None,
-            vehicleCapacity=77,
             maxCurrent=None,
-            phasesConfigured=None,
+            phasesActive=None,
+            vehicleOdometer=0,
+            chargedEnergy=None,
         )
     ]
     fake.vehicles = {}
     async with fake.client() as client:
         lp = await Evcc(client, URL).loadpoint(1)
     assert lp.soc is None  # evcc reports 0 for an unknown charge level
-    assert lp.limit_soc == 100 and lp.capacity_kwh == 77
+    assert lp.limit_soc == 100 and lp.capacity_kwh is None
     assert lp.max_current == 16 and lp.phases == 0
+    assert lp.odometer_km is None and lp.session_kwh is None
+
+
+async def test_loadpoint_reads_the_session_and_the_vehicles_limits(fake: FakeEvcc) -> None:
+    fake.loadpoints = [evcc_loadpoint(chargedEnergy=4200, vehicleOdometer=12.5, phasesActive=1)]
+    fake.vehicles = {"db:1": {"capacity": 50, "maxCurrent": 10}}
+    async with fake.client() as client:
+        lp = await Evcc(client, URL).loadpoint(1)
+    assert (lp.session_kwh, lp.odometer_km, lp.phases) == (4.2, 12.5, 1)
+    assert lp.max_current == 10 and lp.capacity_kwh == 50
+
+
+@pytest.mark.parametrize(
+    ("point", "vehicle", "expected"), [(16, 10, 10), (10, 16, 10), (16, 0, 16)]
+)
+async def test_the_lower_of_the_charging_points_and_the_vehicles_current(
+    fake: FakeEvcc, point: int, vehicle: int, expected: float
+) -> None:
+    fake.loadpoints = [evcc_loadpoint(maxCurrent=point)]
+    fake.vehicles = {"db:1": {"capacity": 50, "maxCurrent": vehicle}}
+    async with fake.client() as client:
+        assert (await Evcc(client, URL).loadpoint(1)).max_current == expected
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        {"loadpoints": [{"vehicleSoc": "lots"}]},
+        {"loadpoints": [{"vehicleName": "a"}], "vehicles": "oops"},
+    ],
+)
+async def test_an_unexpected_state_is_an_evcc_error(fake: FakeEvcc, state: dict) -> None:
+    def odd(request: httpx2.Request) -> httpx2.Response:
+        return httpx2.Response(200, text=json.dumps(state))
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(odd)) as client:
+        with pytest.raises(EvccError, match="unexpected answer"):
+            await Evcc(client, URL).loadpoint(1)
+
+
+async def test_unexpected_history_and_forecast_are_evcc_errors() -> None:
+    def odd(request: httpx2.Request) -> httpx2.Response:
+        body = [{"start": "soon", "grid": 1}] if "history" in request.url.path else {"rates": [{}]}
+        return httpx2.Response(200, text=json.dumps(body))
+
+    async with httpx2.AsyncClient(transport=httpx2.MockTransport(odd)) as client:
+        with pytest.raises(EvccError, match="history/tariffs: unexpected answer"):
+            await Evcc(client, URL).history(NOW)
+        with pytest.raises(EvccError, match="tariff/grid: unexpected answer"):
+            await Evcc(client, URL).forecast()
+
+
+async def test_an_http_error_carries_its_status(fake: FakeEvcc) -> None:
+    fake.fail = {"/api/tariff/planner": 404}
+    async with fake.client() as client:
+        with pytest.raises(EvccError) as error:
+            await Evcc(client, URL).forecast("planner")
+    assert error.value.status == 404
 
 
 @pytest.mark.parametrize("number", [0, 2])

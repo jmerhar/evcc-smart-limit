@@ -10,14 +10,18 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from evcc_smart_limit import memory as memory_store
-from evcc_smart_limit.decide import Action, Decision, Parameters, decide
-from evcc_smart_limit.evcc import Evcc, EvccError
-from evcc_smart_limit.prices import HISTORY_SLOT, build_window
+from evcc_smart_limit.decide import Action, Decision, Memory, Parameters, decide
+from evcc_smart_limit.evcc import OPTIMIZER_CONFLICT, Evcc, EvccError
+from evcc_smart_limit.prices import HISTORY_SLOT, Slot, build_window
 
 logger = logging.getLogger(__name__)
 
+#: Seconds between decisions: one per slot of evcc's price history.
+INTERVAL_SECONDS = 900
+
 MEMORY_FILE = "memory.json"
-#: Written after every cycle that reached evcc; the container's health probe checks its age.
+#: Written after every cycle of the running service that reached evcc; the container's health
+#: probe checks its age.
 STATUS_FILE = "status.json"
 
 
@@ -41,6 +45,13 @@ def describe(decision: Decision) -> str:
     return " | ".join(parts)
 
 
+def same_rates(a: list[Slot], b: list[Slot]) -> bool:
+    """Whether two forecasts give the same price wherever both have one."""
+    prices = {(s.start, s.end): s.price for s in b}
+    common = [(s, prices[(s.start, s.end)]) for s in a if (s.start, s.end) in prices]
+    return bool(common) and all(abs(s.price - p) < 1e-9 for s, p in common)
+
+
 class Controller:
     """Keeps one charging point's smart cost limit up to date, one :meth:`tick` at a time."""
 
@@ -52,6 +63,7 @@ class Controller:
         data_dir: Path,
         *,
         on_success: Callable[[], None] = lambda: None,
+        record_status: bool = False,
         clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self._evcc = evcc
@@ -59,17 +71,36 @@ class Controller:
         self._params = params
         self._data_dir = data_dir
         self._on_success = on_success
+        self._record_status = record_status
         self._clock = clock
+
+    @property
+    def _memory_path(self) -> Path:
+        return self._data_dir / MEMORY_FILE
 
     async def decide(self) -> Decision:
         """Read evcc and decide, without writing anything or touching the memory file."""
         now = self._clock()
+        memory = memory_store.load(self._memory_path, self._loadpoint)
         lp = await self._evcc.loadpoint(self._loadpoint)
+        forecast = await self._evcc.forecast()
+        try:
+            planner = await self._evcc.forecast("planner")
+        except EvccError as error:
+            if error.status != 404:
+                raise
+            planner = []
+        if not same_rates(forecast, planner):
+            # evcc compares the smart cost limit with its planner tariff, so a limit ranked from
+            # grid prices would mean something else there.
+            return Decision(
+                Action.SKIP,
+                "evcc charges by a planner tariff that isn't the grid price; not supported",
+                memory,
+            )
         since = now - timedelta(days=self._params.window_days) - HISTORY_SLOT
         history = await self._evcc.history(since)
-        forecast = await self._evcc.forecast()
         window = build_window(history, forecast, now, self._params.window_days)
-        memory = memory_store.load(self._data_dir / MEMORY_FILE)
         return decide(lp, window, memory, self._params, now)
 
     async def tick(self) -> Decision | None:
@@ -77,21 +108,36 @@ class Controller:
         try:
             decision = await self.decide()
             if decision.action is Action.WRITE and not self._params.dry_run:
-                assert decision.limit is not None
-                await self._evcc.set_smart_cost_limit(self._loadpoint, decision.limit)
-                decision = replace(
-                    decision, memory=replace(decision.memory, last_written=decision.limit)
-                )
+                decision = await self._write(decision)
         except EvccError as error:
             logger.warning("evcc: %s", error)
             return None
 
         prefix = "dry run, " if self._params.dry_run and decision.action is Action.WRITE else ""
         logger.info("%s%s", prefix, describe(decision))
-        memory_store.save(self._data_dir / MEMORY_FILE, decision.memory)
-        self._write_status(decision)
+        memory_store.save(self._memory_path, decision.memory, self._loadpoint)
+        if self._record_status:
+            self._write_status(decision)
         self._on_success()
         return decision
+
+    async def _write(self, decision: Decision) -> Decision:
+        """Write the decision's limit, remembering it first so a lost answer is recognised."""
+        assert decision.limit is not None
+        pending: Memory = replace(decision.memory, pending=decision.limit)
+        memory_store.save(self._memory_path, pending, self._loadpoint)
+        try:
+            await self._evcc.set_smart_cost_limit(self._loadpoint, decision.limit)
+        except EvccError as error:
+            if error.status != OPTIMIZER_CONFLICT:
+                raise
+            return replace(
+                decision,
+                action=Action.SKIP,
+                reason="evcc's optimizer controls this charging point",
+                memory=replace(decision.memory, pending=None),
+            )
+        return replace(decision, memory=replace(pending, last_written=decision.limit, pending=None))
 
     def _write_status(self, decision: Decision) -> None:
         """Record the cycle for the health probe."""

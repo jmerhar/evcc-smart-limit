@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import httpx2
@@ -173,3 +173,58 @@ def test_real_charging_does_not_raise_the_simulated_level() -> None:
     )
     assert controller.min_soc == 30
     assert controller.end_soc == 30
+
+
+async def test_main_aligns_the_start_and_attaches_the_time_zone(
+    fake: FakeEvcc, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    seen = {}
+    real_simulate = backtest.simulate
+
+    def spy(prices, readings, start, end, *rest):  # noqa: ANN001, ANN002, ANN202
+        seen.update(start=start, end=end, reading=readings[0].at)
+        return real_simulate(prices, readings, start, end, *rest)
+
+    monkeypatch.setattr(backtest, "simulate", spy)
+    real = backtest.httpx2.AsyncClient
+    monkeypatch.setattr(
+        backtest.httpx2, "AsyncClient", lambda: real(transport=httpx2.MockTransport(fake.handler))
+    )
+    csv = tmp_path / "soc.csv"
+    csv.write_text("time,soc\n2026-11-15T13:00:00,90\n")
+    settings = Settings(
+        evcc_url="http://evcc.test",
+        capacity_kwh=10,
+        charge_power_kw=10,
+        timezone="Europe/Amsterdam",
+    )
+    a = argparse.Namespace(
+        start=datetime(2026, 11, 15, 13, 7),
+        end=datetime(2026, 11, 16, 13, 0),
+        soc=csv,
+        forecast_hours=24,
+        limit_soc=100,
+    )
+    assert await backtest.main(settings, a) == 0
+    assert seen["start"] == datetime(2026, 11, 15, 13, 0, tzinfo=settings.zone)
+    assert seen["start"] == NOW  # 13:00 in Amsterdam is 12:00 UTC
+    assert seen["end"].tzinfo is not None and seen["reading"] == NOW
+
+
+async def test_main_rejects_an_end_before_the_start(tmp_path: Path, capsys) -> None:  # noqa: ANN001
+    a = args(tmp_path)
+    a.end = a.start
+    settings = Settings(capacity_kwh=10, charge_power_kw=10)
+    assert await backtest.main(settings, a) == 2
+    assert "--to must be after --from" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "content", ["when,level\n2026-11-15T12:00:00Z,50\n", "time,soc\nnoon,50\n"]
+)
+async def test_main_reports_an_unreadable_csv(tmp_path: Path, capsys, content: str) -> None:  # noqa: ANN001
+    a = args(tmp_path)
+    a.soc.write_text(content)
+    settings = Settings(capacity_kwh=10, charge_power_kw=10)
+    assert await backtest.main(settings, a) == 2
+    assert f"cannot read {a.soc}" in capsys.readouterr().err

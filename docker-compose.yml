@@ -1,34 +1,30 @@
-# evcc-smart-limit, as one service next to evcc.
-#
-# Self-contained: this file is all anyone needs to run it, so it pulls the published image rather
-# than naming a build context. Building from source is docker-compose.build.yml, which `make up`
-# adds.
-#
-# ./data holds the controller's memory (the last limit it wrote, a manual-override pause, the last
-# known charge level) and its status file. Put it on evcc's Docker network, or point EVCC_URL at
-# evcc's address on the host.
+# evcc-smart-limit, as one service. Add it to the compose file evcc runs in (or see README.md for
+# other setups). This file stands alone: `docker compose up -d` next to it is enough to try it.
 services:
   evcc-smart-limit:
     image: ghcr.io/jmerhar/evcc-smart-limit:0.2
     container_name: evcc-smart-limit
     restart: unless-stopped
-    user: "${EVCC_SMART_LIMIT_UID:-1000}:${EVCC_SMART_LIMIT_GID:-1000}"
-    mem_limit: 128m
-    # Nothing in the image is written at run time: the application writes only to /data, and
-    # Python writes no bytecode. It needs no Linux capabilities.
+    environment:
+      # Where this container reaches evcc: its service name in the same compose file.
+      EVCC_URL: ${EVCC_URL:-http://evcc:7070}
+      # The charging point, counted from 1 in the order evcc's main page shows them.
+      LOADPOINT: ${LOADPOINT:-1}
+      TZ: ${TZ:-UTC}
+      # Logs what it would set without changing evcc. Set it to false once the log looks right.
+      DRY_RUN: ${DRY_RUN:-true}
+      # Optional: an emptying car accepts higher prices, any price at the floor. See README.md.
+      URGENCY_START: ${URGENCY_START:-}
+      URGENCY_FLOOR: ${URGENCY_FLOOR:-}
+    volumes:
+      # Its memory (the limit it last set, a manual-override pause). A named volume, so it starts
+      # out writable by the container's user.
+      - smart-limit-data:/data
+    # Nothing in the image is written at run time apart from /data.
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
-    environment:
-      TZ: ${TZ:-UTC}
-      LOG_LEVEL: ${LOG_LEVEL:-INFO}
-      EVCC_URL: ${EVCC_URL:-http://evcc:7070}
-      # evcc's API key, as a file: Configuration, API key in evcc's interface.
-      EVCC_API_KEY_FILE: ${EVCC_API_KEY_FILE:-}
-      LOADPOINT: ${LOADPOINT:-1}
-      DRY_RUN: ${DRY_RUN:-false}
-      # Optional: a push monitor's URL, as a file.
-      HEARTBEAT_URL_FILE: ${HEARTBEAT_URL_FILE:-}
-    volumes:
-      - ./data:/data
-      - ./secrets:/run/secrets:ro
+    mem_limit: 128m
+
+volumes:
+  smart-limit-data:
