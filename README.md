@@ -32,6 +32,9 @@ evcc doesn't know your car's charge level.
 - **Optionally, urgency.** After prices rise, last week's cheap hours keep the limit low for days.
   With [urgency](#urgency) an emptying car stops waiting for them and accepts this week's prices.
 
+It checks evcc every minute, so it also reacts within a minute when a car is plugged in or the
+limit in evcc changes.
+
 Each decision is one line in the log, for example:
 
 ```
@@ -107,9 +110,9 @@ docker compose logs -f evcc-smart-limit
 ```
 
 It starts with `controlling charging point 1 at http://evcc:7070 (dry run: nothing is written)`
-and logs one decision every 15 minutes, and straight away when a car is plugged in or the limit
-in evcc changes. In a dry run the lines start with `dry run,`. After the
-first decision `docker ps` shows the container as healthy. If something looks wrong, see
+and logs a decision every 15 minutes, and straight away when a car is plugged in or the limit in
+evcc changes. In a dry run, decisions that would change evcc start with `dry run,`. After the first
+decision `docker ps` shows the container as healthy. If something looks wrong, see
 [Troubleshooting](#troubleshooting).
 
 ### 3. Let it set the limit
@@ -143,7 +146,7 @@ All settings are environment variables. Most installations only need the first g
 | `FACTOR` | `1` | How eager it is. `2` lets twice the needed hours through, so the car charges sooner and fuller at slightly higher prices; raise it if the car is often less full than you'd like. |
 | `CHARGE_POWER_KW` | from evcc | The car's real charging power. Set it if the car charges slower than evcc expects, e.g. a car that charges on one phase. |
 | `CAPACITY_KWH` | from evcc | The car's usable battery capacity, if evcc doesn't know it. |
-| `HEARTBEAT_URL` | none | A push monitor (e.g. Uptime Kuma or healthchecks.io), called after each decision. Give the monitor 30 minutes before it alerts. Or `HEARTBEAT_URL_FILE`. |
+| `HEARTBEAT_URL` | none | A push monitor (e.g. Uptime Kuma or healthchecks.io), called every few minutes while it reaches evcc. Give the monitor 30 minutes before it alerts. Or `HEARTBEAT_URL_FILE`. |
 
 **Advanced**
 
@@ -177,6 +180,9 @@ car has to charge whatever it costs.
 - **To take over yourself**, change the price limit in evcc. The tool leaves it alone until you
   remove the limit or unplug the car; then it takes over again within a minute. A charging plan or
   another mode also takes precedence while active.
+- **To stop it setting a limit at all**, switch the charging point to another mode, set
+  `DRY_RUN: "true"`, or stop the container. Removing the limit is not enough: that hands control
+  back, and it sets a new one within a minute.
 - **evcc's minimum charge level** still works: below it evcc charges at full power at any price,
   up to that level, and then hands back to the price limit. As a safety net for when this tool
   isn't running, set it below `URGENCY_FLOOR`. If your car's charge level is often unknown to
