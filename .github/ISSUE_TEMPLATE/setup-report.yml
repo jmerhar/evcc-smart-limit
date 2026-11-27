@@ -1,0 +1,52 @@
+name: Setup report
+description: Share how the tool works with your setup, including partial setups.
+labels: ["setup-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting your setup. Remove anything private (addresses, tokens, push URLs) before posting.
+  - type: textarea
+    id: works
+    attributes:
+      label: What works, and what doesn't
+      description: Which parts of the tool behave as you need, and which don't (if any).
+    validations:
+      required: true
+  - type: input
+    id: evcc-version
+    attributes:
+      label: evcc version
+      placeholder: "0.319.1"
+    validations:
+      required: true
+  - type: input
+    id: tool-version
+    attributes:
+      label: evcc-smart-limit version
+      description: The image tag you run, e.g. 0.4 or 0.4.0.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: textarea
+    id: setup
+    attributes:
+      label: Setup
+      description: Tariff and slot length, vehicle and charger (with phases and maximum current), and how evcc gets the charge level.
+    validations:
+      required: true
+  - type: dropdown
+    id: dry-run
+    attributes:
+      label: Was DRY_RUN on?
+      options:
+        - "Yes, nothing was written to evcc"
+        - "No, it was setting the limit"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: 'Optional: output of docker logs evcc-smart-limit, one decision line appears every 15 minutes.'
+      render: text
