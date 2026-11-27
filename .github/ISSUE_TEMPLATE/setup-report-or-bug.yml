@@ -59,14 +59,12 @@ body:
     attributes:
       label: Relevant log lines
       description: 'Output of docker logs evcc-smart-limit around the problem. One decision line appears every 15 minutes, plus one on each plug-in or limit change.'
-
       render: text
     validations:
       required: true
   - type: textarea
     id: expected
     attributes:
-      label: What you expected instead
+      label: What you expected instead (bugs, partial setups)
       description: What the limit, the charging or the log should have shown, and what you saw.
-    validations:
-      required: true
+
