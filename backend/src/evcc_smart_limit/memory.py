@@ -28,6 +28,14 @@ def _number(data: dict, key: str) -> float | None:
     return float(value)
 
 
+def _flag(data: dict, key: str) -> bool | None:
+    """A true/false field, or None; anything else is malformed."""
+    value = data.get(key)
+    if value is not None and not isinstance(value, bool):
+        raise ValueError(f"{key} is not true or false")
+    return value
+
+
 def _time(data: dict, key: str) -> datetime | None:
     """A time with its UTC offset, or None; anything else is malformed."""
     value = data.get(key)
@@ -54,6 +62,7 @@ def load(path: Path, loadpoint: int) -> Memory:
             last_soc_at=_time(data, "last_soc_at"),
             last_odometer_km=_number(data, "last_odometer_km"),
             last_session_kwh=_number(data, "last_session_kwh"),
+            last_connected=_flag(data, "last_connected"),
         )
     except FileNotFoundError:
         return Memory()
@@ -73,6 +82,7 @@ def save(path: Path, memory: Memory, loadpoint: int) -> None:
         "last_soc_at": memory.last_soc_at.isoformat() if memory.last_soc_at else None,
         "last_odometer_km": memory.last_odometer_km,
         "last_session_kwh": memory.last_session_kwh,
+        "last_connected": memory.last_connected,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = path.with_suffix(".tmp")

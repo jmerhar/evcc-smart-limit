@@ -78,8 +78,9 @@ class Memory:
 
     ``last_written`` is the limit it last set, and ``pending`` one it is about to set, whose answer
     from evcc may be lost. A limit in evcc that matches neither means someone changed it, and the
-    controller then stays out of the way (``paused``) until the vehicle is next connected. The
-    other fields recognise a new connection and keep the vehicle's last known charge level.
+    controller then stays out of the way (``paused``) until the limit is removed or the vehicle is
+    next connected. The other fields recognise a new connection and keep the vehicle's last known
+    charge level.
     """
 
     last_written: float | None = None
@@ -89,6 +90,8 @@ class Memory:
     last_soc_at: datetime | None = None
     last_odometer_km: float | None = None
     last_session_kwh: float | None = None
+    #: Whether the vehicle was connected at the last look at evcc.
+    last_connected: bool | None = None
 
 
 @dataclass(frozen=True)
@@ -146,7 +149,7 @@ def hours_wanted(needed: float, soc: float, params: Parameters, window_hours: fl
     return base + (window_hours - base) * urgency(soc, params) ** 3
 
 
-def _same(a: float | None, b: float | None) -> bool:
+def same_limit(a: float | None, b: float | None) -> bool:
     """Whether two limits are the same, allowing for float round trips through evcc's JSON."""
     if a is None or b is None:
         return a is b
@@ -198,6 +201,27 @@ def _session_ended(memory: Memory) -> Memory:
     )
 
 
+def observe(lp: Loadpoint, memory: Memory, now: datetime) -> Memory:
+    """The memory after a look at the charging point, without deciding anything.
+
+    Ends what belongs to a connection when the vehicle is unplugged or was away, and keeps the
+    vehicle's charge level, odometer and session energy for the next look. Looking twice at the
+    same state changes nothing the second time, so the controller can look often and decide less
+    often.
+    """
+    if not lp.connected or new_session(lp, memory):
+        memory = _session_ended(memory)
+    memory = replace(
+        memory,
+        last_odometer_km=lp.odometer_km if lp.odometer_km is not None else memory.last_odometer_km,
+        last_session_kwh=lp.session_kwh,
+        last_connected=lp.connected,
+    )
+    if lp.soc is not None:
+        memory = replace(memory, last_soc=lp.soc, last_soc_at=now)
+    return memory
+
+
 def decide(
     lp: Loadpoint, window: Window, memory: Memory, params: Parameters, now: datetime
 ) -> Decision:
@@ -208,15 +232,7 @@ def decide(
     of history plus the forecast, a coming slot passes when it is among the week's cheapest N
     hours, so a vehicle that needs N hours gets about that many over a week of similar prices.
     """
-    if not lp.connected or new_session(lp, memory):
-        memory = _session_ended(memory)
-    memory = replace(
-        memory,
-        last_odometer_km=lp.odometer_km if lp.odometer_km is not None else memory.last_odometer_km,
-        last_session_kwh=lp.session_kwh,
-    )
-    if lp.soc is not None:
-        memory = replace(memory, last_soc=lp.soc, last_soc_at=now)
+    memory = observe(lp, memory, now)
 
     def skip(reason: str) -> Decision:
         return Decision(Action.SKIP, reason, memory)
@@ -230,16 +246,21 @@ def decide(
     if lp.plan_active:
         return skip("a charging plan is active")
 
+    removed = lp.smart_cost_limit is None
+    if removed and (memory.paused or memory.last_written is not None or memory.pending is not None):
+        # Removing the limit in evcc hands control back: Smart mode without a limit never charges
+        # from the grid, which is not something to protect while this tool runs.
+        memory = replace(memory, paused=False, last_written=None, pending=None)
     if memory.paused:
-        return skip("limit changed by hand; paused until the vehicle is next connected")
+        return skip("limit changed by hand; paused until it is removed or the vehicle unplugged")
     expected = [v for v in (memory.last_written, memory.pending) if v is not None]
     if expected:
-        if not any(_same(lp.smart_cost_limit, v) for v in expected):
+        if not any(same_limit(lp.smart_cost_limit, v) for v in expected):
             memory = replace(memory, paused=True, pending=None)
             return Decision(
                 Action.SKIP,
                 f"limit changed by hand (expected {expected[0]}, found "
-                f"{lp.smart_cost_limit}); paused until the vehicle is next connected",
+                f"{lp.smart_cost_limit}); paused until it is removed or the vehicle unplugged",
                 memory,
             )
         # Whichever matched is what evcc holds, including a write whose answer was lost.

@@ -10,7 +10,15 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from evcc_smart_limit import memory as memory_store
-from evcc_smart_limit.decide import Action, Decision, Memory, Parameters, decide
+from evcc_smart_limit.decide import (
+    Action,
+    Decision,
+    Memory,
+    Parameters,
+    decide,
+    observe,
+    same_limit,
+)
 from evcc_smart_limit.evcc import OPTIMIZER_CONFLICT, Evcc, EvccError
 from evcc_smart_limit.prices import HISTORY_SLOT, Slot, build_window
 
@@ -18,6 +26,9 @@ logger = logging.getLogger(__name__)
 
 #: Seconds between decisions: one per slot of evcc's price history.
 INTERVAL_SECONDS = 900
+#: Seconds between looks at the charging point, short enough to notice a quick unplug and replug
+#: or a changed limit, while the prices are read only once per decision.
+LOOK_SECONDS = 60
 
 MEMORY_FILE = "memory.json"
 #: Written after every cycle of the running service that reached evcc; the container's health
@@ -73,6 +84,7 @@ class Controller:
         self._on_success = on_success
         self._record_status = record_status
         self._clock = clock
+        self._next_decision: datetime | None = None
 
     @property
     def _memory_path(self) -> Path:
@@ -103,6 +115,34 @@ class Controller:
         window = build_window(history, forecast, now, self._params.window_days)
         return decide(lp, window, memory, self._params, now)
 
+    async def look(self) -> None:
+        """Look at the charging point, and decide when one is due or something changed.
+
+        A decision is due every INTERVAL_SECONDS, and straight away when a vehicle is plugged in
+        or the limit in evcc no longer is the one this tool set (a manual change, or its removal
+        handing control back).
+        """
+        now = self._clock()
+        before = memory_store.load(self._memory_path, self._loadpoint)
+        try:
+            lp = await self._evcc.loadpoint(self._loadpoint)
+        except EvccError as error:
+            logger.warning("evcc: %s", error)
+            return
+        memory = observe(lp, before, now)
+        plugged_in = lp.connected and before.last_connected is False
+        written = memory.last_written if memory.last_written is not None else memory.pending
+        # A pause keeps the limit this tool set, so removing the limit in evcc shows here too.
+        limit_changed = written is not None and not same_limit(lp.smart_cost_limit, written)
+        if self._next_decision is None or now >= self._next_decision or plugged_in or limit_changed:
+            if await self.tick():
+                self._next_decision = now + timedelta(seconds=INTERVAL_SECONDS)
+            return
+        memory_store.save(self._memory_path, memory, self._loadpoint)
+        if self._record_status:
+            self._write_status("look")
+        self._on_success()
+
     async def tick(self) -> Decision | None:
         """One cycle. A failure to reach evcc is logged and leaves everything as it was."""
         try:
@@ -117,7 +157,7 @@ class Controller:
         logger.info("%s%s", prefix, describe(decision))
         memory_store.save(self._memory_path, decision.memory, self._loadpoint)
         if self._record_status:
-            self._write_status(decision)
+            self._write_status(decision.action.value)
         self._on_success()
         return decision
 
@@ -139,8 +179,8 @@ class Controller:
             )
         return replace(decision, memory=replace(pending, last_written=decision.limit, pending=None))
 
-    def _write_status(self, decision: Decision) -> None:
-        """Record the cycle for the health probe."""
-        status = {"at": self._clock().isoformat(), "action": decision.action.value}
+    def _write_status(self, action: str) -> None:
+        """Record a look or decision that reached evcc, for the health probe."""
+        status = {"at": self._clock().isoformat(), "action": action}
         path = self._data_dir / STATUS_FILE
         path.write_text(json.dumps(status), encoding="utf-8")

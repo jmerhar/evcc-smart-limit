@@ -222,3 +222,104 @@ def test_describe_shows_urgency_when_there_is_some() -> None:
         )
     )
     assert "cheapest 63.4 h of 190 h, urgency 67%" in text
+
+
+async def test_look_decides_first_then_only_when_due(fake: FakeEvcc, tmp_path: Path) -> None:
+    clock = [NOW]
+    beats: list = []
+    async with fake.client() as client:
+        ctl = Controller(
+            Evcc(client, "http://evcc.test"),
+            1,
+            Parameters(),
+            tmp_path,
+            on_success=lambda: beats.append(1),
+            record_status=True,
+            clock=lambda: clock[0],
+        )
+        await ctl.look()
+        assert fake.posts == ["/api/loadpoints/1/smartcostlimit/0.30000"]
+        history_reads = sum(r.url.path == "/api/history/tariffs" for r in fake.requests)
+        clock[0] = NOW + timedelta(minutes=1)
+        await ctl.look()
+        assert sum(r.url.path == "/api/history/tariffs" for r in fake.requests) == history_reads
+        assert json.loads((tmp_path / STATUS_FILE).read_text())["action"] == "look"
+        clock[0] = NOW + timedelta(minutes=15)
+        await ctl.look()
+        assert sum(r.url.path == "/api/history/tariffs" for r in fake.requests) > history_reads
+    assert beats == [1, 1, 1]
+
+
+async def test_look_decides_at_once_after_a_plug_in(fake: FakeEvcc, tmp_path: Path) -> None:
+    clock = [NOW]
+    async with fake.client() as client:
+        ctl = Controller(
+            Evcc(client, "http://evcc.test"), 1, Parameters(), tmp_path, clock=lambda: clock[0]
+        )
+        fake.loadpoints[0]["connected"] = False
+        await ctl.look()
+        fake.loadpoints[0]["connected"] = True
+        clock[0] = NOW + timedelta(minutes=1)
+        await ctl.look()
+    assert fake.posts == ["/api/loadpoints/1/smartcostlimit/0.30000"]
+
+
+async def test_look_catches_a_quick_unplug_and_replug(fake: FakeEvcc, tmp_path: Path) -> None:
+    clock = [NOW]
+    async with fake.client() as client:
+        ctl = Controller(
+            Evcc(client, "http://evcc.test"), 1, Parameters(), tmp_path, clock=lambda: clock[0]
+        )
+        await ctl.look()
+        fake.loadpoints[0]["smartCostLimit"] = 0.5  # changed by hand
+        clock[0] = NOW + timedelta(minutes=1)
+        await ctl.look()
+        assert store.load(tmp_path / MEMORY_FILE, 1).paused
+        fake.loadpoints[0]["connected"] = False
+        clock[0] = NOW + timedelta(minutes=2)
+        await ctl.look()
+        fake.loadpoints[0]["connected"] = True
+        clock[0] = NOW + timedelta(minutes=3)
+        await ctl.look()
+    assert fake.posts[-1] == "/api/loadpoints/1/smartcostlimit/0.30000"
+    assert not store.load(tmp_path / MEMORY_FILE, 1).paused
+
+
+async def test_look_hands_back_when_the_limit_is_removed(fake: FakeEvcc, tmp_path: Path) -> None:
+    clock = [NOW]
+    async with fake.client() as client:
+        ctl = Controller(
+            Evcc(client, "http://evcc.test"), 1, Parameters(), tmp_path, clock=lambda: clock[0]
+        )
+        await ctl.look()
+        fake.loadpoints[0]["smartCostLimit"] = 0.5
+        clock[0] = NOW + timedelta(minutes=1)
+        await ctl.look()
+        fake.loadpoints[0]["smartCostLimit"] = None  # "Remove limit" in evcc
+        clock[0] = NOW + timedelta(minutes=2)
+        await ctl.look()
+    assert len(fake.posts) == 2 and fake.loadpoints[0]["smartCostLimit"] == 0.3
+
+
+async def test_look_survives_evcc_failing(fake: FakeEvcc, tmp_path: Path, caplog) -> None:  # noqa: ANN001
+    fake.fail = {"/api/state": 503}
+    beats: list = []
+    async with fake.client() as client:
+        await controller(fake, client, tmp_path, beats).look()
+    assert beats == [] and "evcc: GET /api/state: HTTP 503" in caplog.text
+
+
+async def test_a_failed_decision_is_retried_at_the_next_look(
+    fake: FakeEvcc, tmp_path: Path
+) -> None:
+    clock = [NOW]
+    async with fake.client() as client:
+        ctl = Controller(
+            Evcc(client, "http://evcc.test"), 1, Parameters(), tmp_path, clock=lambda: clock[0]
+        )
+        fake.fail = {"/api/tariff/grid": 500}
+        await ctl.look()
+        fake.fail = {}
+        clock[0] = NOW + timedelta(minutes=1)
+        await ctl.look()
+    assert fake.posts == ["/api/loadpoints/1/smartcostlimit/0.30000"]

@@ -164,3 +164,22 @@ def test_run_removes_a_stale_status_file(monkeypatch: pytest.MonkeyPatch, tmp_pa
     assert cli.main(["run"]) == 0
     assert not (tmp_path / "status.json").exists()
     assert not (tmp_path / ".write-test").exists()
+
+
+async def test_run_looks_every_minute(wired: FakeEvcc, monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = {}
+    real = cli.TickLoop
+
+    def spy(tick, interval, **kwargs):  # noqa: ANN001, ANN003, ANN202
+        seen.update(tick=tick.__name__, interval=interval)
+        return real(tick, interval, **kwargs)
+
+    monkeypatch.setattr(cli, "TickLoop", spy)
+    task = asyncio.create_task(cli.run(Settings()))
+    for _ in range(200):
+        if wired.posts:
+            break
+        await asyncio.sleep(0.01)
+    os.kill(os.getpid(), signal.SIGTERM)
+    await asyncio.wait_for(task, 5)
+    assert seen == {"tick": "look", "interval": 60}

@@ -18,7 +18,13 @@ from jigkit.scheduler import TickLoop
 from pydantic import ValidationError
 
 from evcc_smart_limit import backtest
-from evcc_smart_limit.controller import INTERVAL_SECONDS, STATUS_FILE, Controller, describe
+from evcc_smart_limit.controller import (
+    INTERVAL_SECONDS,
+    LOOK_SECONDS,
+    STATUS_FILE,
+    Controller,
+    describe,
+)
 from evcc_smart_limit.evcc import Evcc, EvccError
 from evcc_smart_limit.settings import Settings
 
@@ -53,7 +59,7 @@ def _controller(settings: Settings, client: httpx2.AsyncClient, **kwargs: object
 
 
 async def run(settings: Settings) -> None:
-    """Decide every INTERVAL_SECONDS until SIGTERM or SIGINT."""
+    """Look every LOOK_SECONDS and decide every INTERVAL_SECONDS until SIGTERM or SIGINT."""
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
@@ -73,7 +79,7 @@ async def run(settings: Settings) -> None:
             on_success=heartbeat.beat if heartbeat else lambda: None,
             record_status=True,
         )
-        ticker = TickLoop(controller.tick, INTERVAL_SECONDS, name="controller")
+        ticker = TickLoop(controller.look, LOOK_SECONDS, name="controller")
         logger.info(
             "controlling charging point %d at %s%s",
             settings.loadpoint,

@@ -15,6 +15,7 @@ from evcc_smart_limit.decide import (
     decide,
     hours_wanted,
     new_session,
+    observe,
     round_up,
     urgency,
 )
@@ -132,17 +133,46 @@ def test_a_manual_change_pauses_until_the_vehicle_is_next_connected() -> None:
 
     unplugged = decide(loadpoint(connected=False), WINDOW, still.memory, PARAMS, NOW)
     assert unplugged.reason == "vehicle not connected"
-    assert unplugged.memory == replace(still.memory, paused=False, last_written=None)
+    assert unplugged.memory == replace(
+        still.memory, paused=False, last_written=None, last_connected=False
+    )
 
     plugged = decide(loadpoint(smart_cost_limit=0.5), WINDOW, unplugged.memory, PARAMS, NOW)
     assert plugged.action is Action.WRITE
 
 
-def test_a_removed_limit_counts_as_a_manual_change() -> None:
+def test_removing_the_limit_hands_control_back() -> None:
     decision = decide(
         loadpoint(smart_cost_limit=None), WINDOW, Memory(last_written=0.3), PARAMS, NOW
     )
-    assert decision.memory.paused
+    assert not decision.memory.paused
+    assert decision.action is Action.WRITE and decision.limit == 0.3
+
+
+def test_removing_the_limit_ends_a_pause() -> None:
+    memory = Memory(last_written=0.3, paused=True)
+    decision = decide(loadpoint(smart_cost_limit=None), WINDOW, memory, PARAMS, NOW)
+    assert not decision.memory.paused and decision.memory.last_written is None
+    assert decision.action is Action.WRITE
+
+
+def test_a_removed_limit_with_nothing_written_is_just_unset() -> None:
+    decision = decide(loadpoint(smart_cost_limit=None), WINDOW, Memory(), PARAMS, NOW)
+    assert decision.action is Action.WRITE and not decision.memory.paused
+
+
+def test_a_pending_write_and_a_removed_limit_hand_control_back() -> None:
+    memory = Memory(pending=0.3)
+    decision = decide(loadpoint(smart_cost_limit=None), WINDOW, memory, PARAMS, NOW)
+    assert decision.memory.pending is None and decision.action is Action.WRITE
+
+
+def test_observing_twice_changes_nothing_the_second_time() -> None:
+    lp = loadpoint(smart_cost_limit=0.5, odometer_km=1012, session_kwh=0.0)
+    memory = Memory(last_written=0.3, paused=True, last_odometer_km=1000, last_session_kwh=4.0)
+    once = observe(lp, memory, NOW)
+    assert observe(lp, once, NOW) == once
+    assert not once.paused and once.last_connected is True
 
 
 def test_the_limit_written_counts_as_unchanged() -> None:

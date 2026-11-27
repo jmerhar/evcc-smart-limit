@@ -3,6 +3,15 @@
 Notable changes to evcc-smart-limit. The format follows [Keep a Changelog](https://keepachangelog.com/),
 and versions follow [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- It looks at evcc every minute and decides every 15 minutes, and straight away when a car is
+  plugged in or the limit in evcc changes. A quick unplug and replug is no longer missed.
+- Removing the price limit in evcc (**Remove limit**) hands control back, also during a pause after
+  a manual change, so taking over again needs no unplugging.
+
 ## 0.3.0 — 2026-11-25
 
 ### Added

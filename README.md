@@ -41,8 +41,8 @@ write: new limit | limit 0.21874 | charge level 60% (24.0 kWh to go) | cheapest 
 ## When it leaves the limit alone
 
 - The charging point isn't in **Smart** mode, a charging plan is active, or no car is plugged in.
-- **You changed the price limit yourself** in evcc: it stops touching it until you unplug the car.
-  Plug in again and it takes over. Removing the limit counts as a change too.
+- **You changed the price limit yourself** in evcc: it stops touching it until you remove the limit
+  (**Remove limit** in evcc) or unplug the car, and takes over again within a minute.
 - The car's charge level is unknown. While the car stays plugged in, it keeps using the last
   known one for up to 6 hours.
 - evcc's optimizer controls the charging point, or evcc charges by a planner tariff that isn't
@@ -107,7 +107,8 @@ docker compose logs -f evcc-smart-limit
 ```
 
 It starts with `controlling charging point 1 at http://evcc:7070 (dry run: nothing is written)`
-and logs one decision every 15 minutes. In a dry run the lines start with `dry run,`. After the
+and logs one decision every 15 minutes, and straight away when a car is plugged in or the limit
+in evcc changes. In a dry run the lines start with `dry run,`. After the
 first decision `docker ps` shows the container as healthy. If something looks wrong, see
 [Troubleshooting](#troubleshooting).
 
@@ -174,7 +175,8 @@ car has to charge whatever it costs.
 ## Day to day
 
 - **To take over yourself**, change the price limit in evcc. The tool leaves it alone until you
-  unplug. A charging plan or another mode also takes precedence while active.
+  remove the limit or unplug the car; then it takes over again within a minute. A charging plan or
+  another mode also takes precedence while active.
 - **evcc's minimum charge level** still works: below it evcc charges at full power at any price,
   up to that level, and then hands back to the price limit. As a safety net for when this tool
   isn't running, set it below `URGENCY_FLOOR`. If your car's charge level is often unknown to
@@ -200,7 +202,7 @@ car has to charge whatever it costs.
 | `skip: mode is …, not smart` | Switch the charging point to **Smart**. |
 | `skip: charge level unknown` | evcc doesn't know the car's charge level. |
 | `skip: battery capacity unknown; set CAPACITY_KWH` | Set the capacity in evcc's vehicle settings, or `CAPACITY_KWH`. |
-| `skip: limit changed by hand …; paused …` | You changed the limit. Unplug and plug in again to hand control back. |
+| `skip: limit changed by hand …; paused …` | You changed the limit. Remove it in evcc (or unplug the car) to hand control back. |
 | `skip: evcc charges by a planner tariff …` | evcc's planner tariff isn't the grid price (e.g. a CO₂ tariff), so a price limit would mean something else. Not supported. |
 | `skip: evcc's optimizer controls this charging point` | evcc's optimizer sets the limit itself. |
 | `… no forecast slot at or below it` | Not an error: no price in the forecast is low enough yet, so the car waits. If it waits too long after a price rise, turn on urgency. |

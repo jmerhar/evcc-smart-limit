@@ -22,6 +22,7 @@ def test_round_trip(tmp_path: Path) -> None:
         last_soc_at=NOW,
         last_odometer_km=1200.5,
         last_session_kwh=3.2,
+        last_connected=False,
     )
     path = tmp_path / "sub" / "memory.json"
     store.save(path, memory, 2)
@@ -51,6 +52,7 @@ def test_another_charging_points_memory_is_not_used(tmp_path: Path, caplog) -> N
         "{not json",
         '{"loadpoint": 1, "last_written": "0.3"}',
         '{"loadpoint": 1, "last_soc": true}',
+        '{"loadpoint": 1, "last_connected": "yes"}',
         '{"loadpoint": 1, "last_soc_at": "2026-11-15T12:00:00"}',
         '{"loadpoint": 1, "last_soc_at": 5}',
         "[]",
