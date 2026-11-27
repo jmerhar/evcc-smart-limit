@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and how-tos
+    url: https://github.com/evcc-io/evcc/discussions/categories/solutions
+    about: Ask about setting up evcc, or share how you use this tool, in evcc's Solutions category.

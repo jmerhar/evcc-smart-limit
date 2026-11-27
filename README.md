@@ -236,14 +236,26 @@ It prints the energy, cost, average price and lowest and final charge level of b
 Other settings such as `FACTOR` and urgency apply as in the running service, so you can compare
 them.
 
+## Tested setups
+
+Verified in regular use:
+
+- evcc 0.319.x;
+- a Kia EV9 (99.8 kWh) through evcc's Kia vehicle integration, reporting its charge level and limit;
+- a Zaptec Go 2 wallbox through a user-defined charger, three-phase at 11 kW;
+- Frank Energie's dynamic tariff, which publishes 15-minute prices.
+
+The amd64 image runs in that setup. The arm64 image is built but has not been run anywhere yet.
+
+Reports from other setups are welcome: open an issue from the
+[setup report form](https://github.com/jmerhar/evcc-smart-limit/issues/new/choose).
+
 ## Limitations
 
 - It looks back a week, so it follows a lasting change in prices with some delay; urgency covers
   the case where that matters.
 - One charging point per container; heating devices are not supported.
-- Tested with evcc 0.319, a Dutch dynamic tariff with 15-minute prices, and one three-phase 11 kW
-  charger with a car that reports its charge level and charge limit. Reports from other setups are
-  welcome as issues.
+- It doesn't manage Fast charging: while a charging point is in Fast mode, it steps aside.
 
 ## Development
 

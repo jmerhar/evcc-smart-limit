@@ -1,0 +1,72 @@
+name: Setup report or bug
+description: Report how the tool works with your setup, or something that went wrong.
+labels: []
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Logs help most. Remove anything private (addresses, tokens, push URLs) before posting.
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What is this?
+      options:
+        - Setup report (it works, or works partly)
+        - Bug (it does something wrong)
+    validations:
+      required: true
+  - type: input
+    id: evcc-version
+    attributes:
+      label: evcc version
+      placeholder: "0.319.1"
+    validations:
+      required: true
+  - type: input
+    id: tool-version
+    attributes:
+      label: evcc-smart-limit version
+      description: The image tag you run, e.g. 0.4 or 0.4.0.
+      placeholder: "0.4.0"
+    validations:
+      required: true
+  - type: textarea
+    id: tariff
+    attributes:
+      label: Tariff and price slots
+      description: Provider, the tariff (dynamic, 15-minute or hourly prices), and the slot length evcc shows.
+      placeholder: "Dynamic tariff, 15-minute slots"
+    validations:
+      required: true
+  - type: textarea
+    id: vehicle-charger
+    attributes:
+      label: Vehicle and charger
+      description: Make and model, battery capacity, how evcc gets the charge level (vehicle integration, or none), and the charger with its phases and maximum current.
+    validations:
+      required: true
+  - type: dropdown
+    id: dry-run
+    attributes:
+      label: Was DRY_RUN on?
+      options:
+        - "Yes, nothing was written to evcc"
+        - "No, it was setting the limit"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant log lines
+      description: 'Output of docker logs evcc-smart-limit around the problem. One decision line appears every 15 minutes, plus one on each plug-in or limit change.'
+
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected instead
+      description: What the limit, the charging or the log should have shown, and what you saw.
+    validations:
+      required: true
