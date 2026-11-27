@@ -63,8 +63,15 @@ body:
     validations:
       required: true
   - type: textarea
+    id: happened
+    attributes:
+      label: What happened
+      description: Describe what the tool did, or failed to do, and when. For a setup report, what works and what doesn't.
+    validations:
+      required: true
+  - type: textarea
     id: expected
     attributes:
-      label: What you expected instead (bugs, partial setups)
-      description: What the limit, the charging or the log should have shown, and what you saw.
+      label: What you expected instead (optional)
+      description: For bugs, what the limit, the charging or the log should have shown.
 
