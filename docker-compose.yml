@@ -2,7 +2,7 @@
 # other setups). This file stands alone: `docker compose up -d` next to it is enough to try it.
 services:
   evcc-smart-limit:
-    image: ghcr.io/jmerhar/evcc-smart-limit:0.3
+    image: ghcr.io/jmerhar/evcc-smart-limit:0.4
     container_name: evcc-smart-limit
     restart: unless-stopped
     environment:

@@ -70,7 +70,7 @@ If evcc runs with Docker Compose, add this to the same compose file:
 ```yaml
 services:
   evcc-smart-limit:
-    image: ghcr.io/jmerhar/evcc-smart-limit:0.3
+    image: ghcr.io/jmerhar/evcc-smart-limit:0.4
     restart: unless-stopped
     environment:
       EVCC_URL: http://evcc:7070   # evcc's service name and port
@@ -186,7 +186,7 @@ car has to charge whatever it costs.
 ## Updating and removing
 
 - **Update:** `docker compose pull evcc-smart-limit && docker compose up -d evcc-smart-limit`.
-  The `0.3` tag follows fixes; a new feature release (0.4) needs the tag changed.
+  The `0.4` tag follows fixes; a new feature release (0.5) needs the tag changed.
 - **Remove:** `docker compose rm -sf evcc-smart-limit`, then delete the service from the compose
   file and `docker volume rm` its volume. The last limit it set stays in evcc: remove it in the
   charging point's settings under **Cheap Grid Charging**.
